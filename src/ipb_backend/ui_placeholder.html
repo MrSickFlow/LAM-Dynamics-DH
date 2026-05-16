@@ -179,9 +179,9 @@
         </div>
       </div>
 
-      <!-- Scenario Controls -->
+      <!-- Area Controls -->
       <div class="section">
-        <div class="section-header">Scenario</div>
+        <div class="section-header">Area</div>
         <div class="section-body">
           <form id="scenario-form">
             <input id="area-input" name="area" value="North Karelia" placeholder="Area" />
@@ -223,7 +223,7 @@
         </div>
       </div>
 
-      <div class="status-bar" id="status-line">Ready. Set area and click Refresh to ingest data.</div>
+      <div class="status-bar" id="status-line">Loading...</div>
     </aside>
   </div>
 
@@ -514,6 +514,14 @@
     async function loadWorkspace() {
       if (!state.map) initMap();
       document.getElementById("map-area-label").textContent = state.area;
+      statusLine.textContent = `Auto-ingesting data for ${state.area}...`;
+
+      try {
+        await fetch("/api/ingest", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ area: state.area, timeframe: state.timeframe }),
+        });
+      } catch (e) { console.error("Ingest failed:", e); }
 
       try {
         const [placeholderResp, datasetsResp, sourcesResp] = await Promise.all([
@@ -542,7 +550,6 @@
       state.timeframe = timeframeInput.value.trim() || "72h";
       document.getElementById("map-area-label").textContent = state.area;
       if (state.map) state.map.setView(getCenter(state.area), 9);
-      await ingest();
       await loadWorkspace();
     });
 
