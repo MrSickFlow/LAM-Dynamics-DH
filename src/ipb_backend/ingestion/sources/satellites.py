@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
+from sgp4.api import Satrec, jday
 
 from ipb_backend.ingestion.base import SourceAdapter
 from ipb_backend.models import DatasetRecord, LoadTarget
@@ -228,9 +229,13 @@ class SatelliteTleAdapter(SourceAdapter):
         if not used_demo:
             now = datetime.now(timezone.utc)
             for name, info in satellite_info.items():
-                tle = info.get("tle_line_2", "")
-                passes = self._simple_pass_prediction(tle, center["lat"], center["lon"], now)
+                tle1 = info.get("tle_line_1", "")
+                tle2 = info.get("tle_line_2", "")
+                passes = self._simple_pass_prediction(tle2, center["lat"], center["lon"], now)
                 info["predicted_passes"] = passes
+                pos = self._compute_position(tle1, tle2, now)
+                if pos:
+                    info["current_lat"], info["current_lon"], info["current_alt_km"] = pos
 
         return DatasetRecord(
             source_id=self.definition.source_id,
@@ -286,6 +291,30 @@ class SatelliteTleAdapter(SourceAdapter):
             return sorted(passes, key=lambda p: p["pass_time_unix"])[:6]
         except (ValueError, IndexError):
             return []
+
+    def _compute_position(self, tle_line1: str, tle_line2: str, now: datetime) -> tuple[float, float, float] | None:
+        """Return (lat, lon, alt_km) of satellite sub-point at the given time, or None on error."""
+        try:
+            satrec = Satrec.twoline2rv(tle_line1, tle_line2)
+            jd, fr = jday(now.year, now.month, now.day, now.hour, now.minute,
+                          now.second + now.microsecond / 1e6)
+            e, r, _ = satrec.sgp4(jd, fr)
+            if e != 0 or r is None:
+                return None
+            # TEME → ECEF via GMST rotation
+            T = (jd + fr - 2451545.0) / 36525.0
+            gmst_sec = (67310.54841 + (876600 * 3600 + 8640184.812866) * T
+                        + 0.093104 * T ** 2 - 6.2e-6 * T ** 3) % 86400.0
+            gmst = math.radians(gmst_sec / 240.0)
+            x = r[0] * math.cos(gmst) + r[1] * math.sin(gmst)
+            y = -r[0] * math.sin(gmst) + r[1] * math.cos(gmst)
+            z = r[2]
+            lon = math.degrees(math.atan2(y, x))
+            lat = math.degrees(math.atan2(z, math.sqrt(x ** 2 + y ** 2)))
+            alt = math.sqrt(x ** 2 + y ** 2 + z ** 2) - 6371.0
+            return round(lat, 4), round(lon, 4), round(alt, 1)
+        except Exception:
+            return None
 
     def _build_summary(self, area: str, satellite_info: dict[str, Any]) -> str:
         count = len(satellite_info)

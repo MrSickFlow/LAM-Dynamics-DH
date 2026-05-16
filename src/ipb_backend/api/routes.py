@@ -713,18 +713,22 @@ async def map_data_satellites(area: str = Query("North Karelia"), services=Depen
     features = []
     for name, info in satellites.items():
         passes = info.get("predicted_passes", [])
-        next_pass = passes[0] if passes else {}
+        next_pass = next((p for p in passes if p.get("pass_time_unix", 0) > 0), passes[0] if passes else {})
+        lat = info.get("current_lat", center_lat)
+        lon = info.get("current_lon", center_lon)
         features.append({
             "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [center_lon, center_lat]},
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
             "properties": {
                 "_collection": "satellites",
                 "_label": "Satellite",
                 "name": name,
                 "type": info.get("type", ""),
                 "norad_id": info.get("norad_id"),
+                "current_alt_km": info.get("current_alt_km"),
                 "next_pass": next_pass.get("pass_time_utc", ""),
                 "altitude_km": next_pass.get("altitude_km", ""),
+                "has_position": "current_lat" in info,
             },
         })
     return {

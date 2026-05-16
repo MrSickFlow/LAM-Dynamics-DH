@@ -1761,7 +1761,15 @@
               details = (ptype ? `<br>Type: ${ptype}` : "") + (voltage ? `<br>Voltage: ${voltage}` : "");
             } else {
               if (props.radio) details += `<br>Radio: ${props.radio}`;
-              if (props.next_pass) details += `<br>Next pass: ${props.next_pass}`;
+              if (collection.id === "satellites") {
+                if (props.type) details += `<br><small>${props.type}</small>`;
+                if (props.current_alt_km) details += `<br>Altitude: ${props.current_alt_km} km`;
+                if (props.norad_id) details += `<br>NORAD: ${props.norad_id}`;
+                if (props.next_pass) details += `<br>Next pass: <b>${new Date(props.next_pass).toUTCString().replace(" GMT","Z")}</b>`;
+                if (!props.has_position) details += `<br><small style="color:#aaa">Position estimated</small>`;
+              } else if (props.next_pass) {
+                details += `<br>Next pass: ${props.next_pass}`;
+              }
             }
             layerRef.bindPopup(`<b>${collection.label}</b>${name ? `<br>${name}` : ""}${details}`);
           },
@@ -2073,7 +2081,7 @@
       weather:                "Current conditions from the nearest FMI (Finnish Meteorological Institute) weather station: temperature, wind speed/direction, precipitation and visibility. Updated every observation cycle.",
       // Cell & Satellites
       celltowers:             "Mobile network mast locations from OpenCelliD. Indicates communications infrastructure coverage. Loss of towers degrades civilian and some military communications.",
-      satellites:             "Active satellites currently in observation geometry relevant to this area. Includes imagery and SAR satellites with estimated pass times.",
+      satellites:             "Reconnaissance and imaging satellites with real-time positions computed from TLE orbital data (SGP4). Each dot shows where the satellite is right now. Click for NORAD ID, altitude, type and next predicted pass over the area.",
       // Bridges & Tunnels
       bridges:                "Bridges and underpasses from Digiroad with load data: max mass (t), axle load (t), height clearance (m) and width (m). Critical for route planning with heavy vehicles.",
       tunnels:                "Road tunnels from Digiroad. Shown with dashed lines. Single points of failure for road corridors — high vulnerability to disruption.",

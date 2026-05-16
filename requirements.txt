@@ -8,3 +8,4 @@ shapely==2.1.0
 pyproj==3.7.1
 rasterio==1.4.3
 numpy==2.2.5
+sgp4
