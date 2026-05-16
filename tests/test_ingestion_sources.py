@@ -63,7 +63,7 @@ async def test_nls_fetch_raises_when_all_collections_fail(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_osm_poi_fetch_raises_when_all_categories_fail(monkeypatch):
+async def test_osm_poi_fetch_falls_back_to_demo_when_all_categories_fail(monkeypatch):
     definition = SourceDefinition(
         source_id="osm-poi",
         name="OpenStreetMap POIs",
@@ -75,12 +75,15 @@ async def test_osm_poi_fetch_raises_when_all_categories_fail(monkeypatch):
 
     monkeypatch.setattr("ipb_backend.ingestion.sources.osm_poi.httpx.AsyncClient", lambda *args, **kwargs: FailingAsyncClient())
 
-    with pytest.raises(ValueError, match="OSM POI fetch failed for all categories"):
-        await adapter.fetch("North Karelia", "24h")
+    record = await adapter.fetch("North Karelia", "24h")
+    assert record.data.get("provider", "").startswith("Demo")
+    categories = record.data.get("categories", {})
+    assert any(len(pois) > 0 for pois in categories.values())
+    assert record.data.get("total_features", 0) > 0
 
 
 @pytest.mark.anyio
-async def test_satellite_fetch_raises_when_all_feeds_fail(monkeypatch):
+async def test_satellite_fetch_falls_back_to_demo_when_all_feeds_fail(monkeypatch):
     definition = SourceDefinition(
         source_id="satellites",
         name="Satellite TLE Data",
@@ -92,8 +95,10 @@ async def test_satellite_fetch_raises_when_all_feeds_fail(monkeypatch):
 
     monkeypatch.setattr("ipb_backend.ingestion.sources.satellites.httpx.AsyncClient", lambda *args, **kwargs: FailingAsyncClient())
 
-    with pytest.raises(ValueError, match="Satellite TLE fetch failed for all feeds"):
-        await adapter.fetch("North Karelia", "24h")
+    record = await adapter.fetch("North Karelia", "24h")
+    satellites = record.data.get("satellites", {})
+    assert len(satellites) > 0
+    assert "USA 224" in satellites or "Sentinel-2A" in satellites
 
 
 def test_statistics_finland_grid_concentrates_joensuu_population():

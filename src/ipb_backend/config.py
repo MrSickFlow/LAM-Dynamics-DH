@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     digiroad_api_key: str = ""
     statistics_finland_api_key: str = ""
     opencellid_api_key: str = ""
+    space_track_username: str = ""
+    space_track_password: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

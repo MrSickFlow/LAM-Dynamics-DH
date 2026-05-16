@@ -712,6 +712,17 @@
             <div class="overlay-list" id="overlay-controls"></div>
           </div>
         </div>
+
+        <div class="panel-card is-collapsible" id="agents-panel">
+          <button class="panel-card-header" id="agents-panel-toggle" type="button" aria-expanded="true">
+            <div class="panel-title">Analysis Agents</div>
+            <span class="collapse-icon">▾</span>
+          </button>
+          <div class="panel-card-body" id="agents-panel-body">
+            <div class="panel-copy">Run individual analysis agents against the current workspace area.</div>
+            <div id="agent-buttons"></div>
+          </div>
+        </div>
       </aside>
 
       <div class="draw-hint" id="draw-hint">Shift + drag creates a polygon AOI. The map stays as the cursor, and all extracted information appears on the right.</div>
@@ -757,6 +768,18 @@
           <div class="bullet-list" id="agent-findings"></div>
           <div class="agent-limitations" id="agent-limitations"></div>
           <div class="bullet-list" id="agent-evidence"></div>
+        </div>
+      </div>
+
+      <div class="section is-collapsible" data-section>
+        <button class="section-toggle" type="button" aria-expanded="true">
+          <div class="section-header">Agent Run Results</div>
+          <span class="collapse-icon">▾</span>
+        </button>
+        <div class="section-body">
+          <div id="agent-run-display">
+            <p class="empty-state">Run an agent from the settings panel to see results here.</p>
+          </div>
         </div>
       </div>
 
@@ -853,6 +876,32 @@
       { id: "osoitepiste", label: "Address points", color: "#888" },
     ];
 
+    const POI_COLLECTIONS = [
+      { id: "poi-education", label: "Education", color: "#c46c32" },
+      { id: "poi-healthcare", label: "Healthcare", color: "#c46c32" },
+      { id: "poi-water_sources", label: "Water Sources", color: "#195d85" },
+      { id: "poi-religion", label: "Religion", color: "#c46c32" },
+      { id: "poi-emergency_services", label: "Emergency Services", color: "#c46c32" },
+      { id: "poi-government", label: "Government", color: "#195d85" },
+      { id: "poi-transport", label: "Transport", color: "#c46c32" },
+      { id: "poi-industry", label: "Industry", color: "#5a6a61" },
+      { id: "poi-forest", label: "Forest", color: "#2a8a5c" },
+    ];
+
+    const CELL_TOWER_COLLECTIONS = [
+      { id: "celltowers", label: "Cell Towers", color: "#888" },
+    ];
+
+    const SATELLITE_COLLECTIONS = [
+      { id: "satellites", label: "Satellites", color: "#195d85" },
+    ];
+
+    const BRIDGE_COLLECTIONS = [
+      { id: "bridges", label: "Bridges & Tunnels", color: "#c46c32" },
+    ];
+
+    const ALL_OVERLAY_COLLECTIONS = [...NLS_COLLECTIONS, ...POI_COLLECTIONS, ...CELL_TOWER_COLLECTIONS, ...SATELLITE_COLLECTIONS, ...BRIDGE_COLLECTIONS];
+
     const OVERLAY_CATEGORIES = [
       {
         name: "Topographical",
@@ -860,11 +909,23 @@
       },
       {
         name: "Infrastructure",
-        ids: ["tieviiva", "rakennus", "rautatie", "sahkolinja", "taajaanrakennettualue", "lentokenttaalue", "satamaalue", "rautatieliikennepaikka", "osoitepiste"],
+        ids: ["tieviiva", "rakennus", "rautatie", "sahkolinja", "bridges", "taajaanrakennettualue", "lentokenttaalue", "satamaalue", "rautatieliikennepaikka", "osoitepiste"],
       },
       {
         name: "Boundaries & Places",
         ids: ["kunta", "kunnanhallintoraja", "luonnonsuojelualue", "paikannimi"],
+      },
+      {
+        name: "Communications",
+        ids: ["celltowers"],
+      },
+      {
+        name: "Points of Interest",
+        ids: ["poi-education", "poi-healthcare", "poi-water_sources", "poi-religion", "poi-emergency_services", "poi-government", "poi-transport", "poi-industry", "poi-forest"],
+      },
+      {
+        name: "Satellites",
+        ids: ["satellites"],
       },
       {
         name: "Weather",
@@ -873,8 +934,8 @@
       },
     ];
 
-    const WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad"];
-    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["tieviiva", "rakennus", "jarvi", "virtavesialue", "weather"]);
+    const WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites"];
+    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["tieviiva", "rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites"]);
 
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
@@ -898,6 +959,18 @@
       satamaalue: { color: "#215347", weight: 1, fillOpacity: 0.1 },
       rautatieliikennepaikka: { point: true, color: "#c46c32" },
       osoitepiste: { point: true, color: "#888" },
+      "poi-education": { point: true, color: "#c46c32" },
+      "poi-healthcare": { point: true, color: "#c46c32" },
+      "poi-water_sources": { point: true, color: "#195d85" },
+      "poi-religion": { point: true, color: "#c46c32" },
+      "poi-emergency_services": { point: true, color: "#c46c32" },
+      "poi-government": { point: true, color: "#195d85" },
+      "poi-transport": { point: true, color: "#c46c32" },
+      "poi-industry": { point: true, color: "#5a6a61" },
+      "poi-forest": { point: true, color: "#2a8a5c" },
+      celltowers: { point: true, color: "#888" },
+      satellites: { point: true, color: "#195d85" },
+      bridges: { color: "#c46c32", weight: 2.5, fill: false },
     };
 
     function getCenter(area) {
@@ -928,12 +1001,12 @@
         maxZoom: 18,
       }).addTo(state.map);
 
-      NLS_COLLECTIONS.forEach((collection) => {
+      ALL_OVERLAY_COLLECTIONS.forEach((collection) => {
         const style = COLL_STYLE[collection.id] || { color: "#888", weight: 1 };
         const layer = L.geoJSON(null, {
           style: style.point ? undefined : style,
           pointToLayer: (_, latlng) => L.circleMarker(latlng, {
-            radius: 5,
+            radius: collection.id === "celltowers" ? 6 : 5,
             fillColor: style.color || "#888",
             color: "#fff",
             weight: 1,
@@ -942,7 +1015,9 @@
           onEachFeature: (feature, layerRef) => {
             const props = feature.properties || {};
             const name = props.nimi || props.namn || props.name || "";
-            layerRef.bindPopup(`<b>${collection.label}</b>${name ? `<br>${name}` : ""}`);
+            const extra = props.radio ? `<br>Radio: ${props.radio}` : "";
+            const pass = props.next_pass ? `<br>Next pass: ${props.next_pass}` : "";
+            layerRef.bindPopup(`<b>${collection.label}</b>${name ? `<br>${name}` : ""}${extra}${pass}`);
           },
         });
         state.collectionLayers[collection.id] = layer;
@@ -1081,7 +1156,7 @@
 
     function renderOverlays() {
       overlayControls.innerHTML = "";
-      const collectionLookup = Object.fromEntries(NLS_COLLECTIONS.map((collection) => [collection.id, collection]));
+      const collectionLookup = Object.fromEntries(ALL_OVERLAY_COLLECTIONS.map((collection) => [collection.id, collection]));
 
       OVERLAY_CATEGORIES.forEach((category, index) => {
         const wrapper = document.createElement("div");
@@ -1170,17 +1245,21 @@
       }
     }
 
-    function setNlsOverlayAvailability(available, message = "") {
-      NLS_COLLECTIONS.forEach((collection) => {
-        const checkbox = document.querySelector(`input[data-collection="${collection.id}"]`);
+    function setLayerAvailability(collectionIds, available, message = "") {
+      collectionIds.forEach((id) => {
+        const checkbox = document.querySelector(`input[data-collection="${id}"]`);
         if (!checkbox) return;
         checkbox.disabled = !available;
         checkbox.title = available ? "" : message;
         if (!available) checkbox.checked = false;
-        if (!available && state.collectionLayers[collection.id]) {
-          state.map.removeLayer(state.collectionLayers[collection.id]);
+        if (!available && state.collectionLayers[id]) {
+          state.map.removeLayer(state.collectionLayers[id]);
         }
       });
+    }
+
+    function setNlsOverlayAvailability(available, message = "") {
+      setLayerAvailability(NLS_COLLECTIONS.map((c) => c.id), available, message);
     }
 
     async function loadMapData() {
@@ -1220,6 +1299,93 @@
         console.error("Map data load failed:", error);
         setNlsOverlayAvailability(false, "Base NLS overlays could not be refreshed.");
         statusLine.textContent = "Base NLS overlays could not be refreshed.";
+      }
+    }
+
+    async function loadPoiMapData() {
+      try {
+        const response = await fetch(`/api/map-data/osm-poi?area=${encodeURIComponent(state.bootstrapArea)}`);
+        const geojson = await response.json();
+        POI_COLLECTIONS.forEach((c) => state.collectionLayers[c.id]?.clearLayers());
+        if (geojson.available === false) {
+          setLayerAvailability(POI_COLLECTIONS.map((c) => c.id), false, "OSM POI data unavailable.");
+          return;
+        }
+        setLayerAvailability(POI_COLLECTIONS.map((c) => c.id), true);
+        const grouped = {};
+        geojson.features.forEach((feature) => {
+          const collection = feature.properties?._collection;
+          if (!collection) return;
+          if (!grouped[collection]) grouped[collection] = [];
+          grouped[collection].push(feature);
+        });
+        Object.entries(grouped).forEach(([collection, features]) => {
+          const layer = state.collectionLayers[collection];
+          if (!layer) return;
+          layer.addData({ type: "FeatureCollection", features });
+          const checkbox = document.querySelector(`input[data-collection="${collection}"]`);
+          if (!checkbox || checkbox.checked) layer.addTo(state.map);
+        });
+      } catch (error) {
+        console.error("POI map data load failed:", error);
+        setLayerAvailability(POI_COLLECTIONS.map((c) => c.id), false, "OSM POI overlays could not be refreshed.");
+      }
+    }
+
+    async function loadCellTowerMapData() {
+      try {
+        const response = await fetch(`/api/map-data/opencellid?area=${encodeURIComponent(state.bootstrapArea)}`);
+        const geojson = await response.json();
+        state.collectionLayers["celltowers"]?.clearLayers();
+        if (geojson.available === false) {
+          setLayerAvailability(["celltowers"], false, "Cell tower data unavailable.");
+          return;
+        }
+        setLayerAvailability(["celltowers"], true);
+        state.collectionLayers["celltowers"]?.addData(geojson);
+        const checkbox = document.querySelector('input[data-collection="celltowers"]');
+        if (!checkbox || checkbox.checked) state.collectionLayers["celltowers"]?.addTo(state.map);
+      } catch (error) {
+        console.error("Cell tower map data load failed:", error);
+        setLayerAvailability(["celltowers"], false, "Cell tower overlays could not be refreshed.");
+      }
+    }
+
+    async function loadSatelliteMapData() {
+      try {
+        const response = await fetch(`/api/map-data/satellites?area=${encodeURIComponent(state.bootstrapArea)}`);
+        const geojson = await response.json();
+        state.collectionLayers["satellites"]?.clearLayers();
+        if (geojson.available === false) {
+          setLayerAvailability(["satellites"], false, "Satellite data unavailable.");
+          return;
+        }
+        setLayerAvailability(["satellites"], true);
+        state.collectionLayers["satellites"]?.addData(geojson);
+        const checkbox = document.querySelector('input[data-collection="satellites"]');
+        if (!checkbox || checkbox.checked) state.collectionLayers["satellites"]?.addTo(state.map);
+      } catch (error) {
+        console.error("Satellite map data load failed:", error);
+        setLayerAvailability(["satellites"], false, "Satellite overlays could not be refreshed.");
+      }
+    }
+
+    async function loadBridgeMapData() {
+      try {
+        const response = await fetch(`/api/map-data/digiroad?area=${encodeURIComponent(state.bootstrapArea)}`);
+        const geojson = await response.json();
+        state.collectionLayers["bridges"]?.clearLayers();
+        if (geojson.available === false) {
+          setLayerAvailability(["bridges"], false, "Bridge data unavailable.");
+          return;
+        }
+        setLayerAvailability(["bridges"], true);
+        state.collectionLayers["bridges"]?.addData(geojson);
+        const checkbox = document.querySelector('input[data-collection="bridges"]');
+        if (!checkbox || checkbox.checked) state.collectionLayers["bridges"]?.addTo(state.map);
+      } catch (error) {
+        console.error("Bridge map data load failed:", error);
+        setLayerAvailability(["bridges"], false, "Bridge overlays could not be refreshed.");
       }
     }
 
@@ -1316,6 +1482,11 @@
         { label: "Population", value: metrics ? formatNumber(metrics.population_total) : "--" },
         { label: "Weather Stations", value: metrics ? formatNumber(metrics.weather_station_count) : "--" },
       ];
+
+      const fc = metrics?.feature_counts_by_source || {};
+      if (fc.opencellid) items.push({ label: "Cell Towers", value: formatNumber(fc.opencellid) });
+      if (fc["osm-poi"]) items.push({ label: "POIs", value: formatNumber(fc["osm-poi"]) });
+      if (fc.satellites) items.push({ label: "Satellites", value: formatNumber(fc.satellites) });
 
       metricsGrid.innerHTML = "";
       items.forEach((item) => {
@@ -1551,6 +1722,31 @@
         };
       }
 
+      if (sourceId === "opencellid") {
+        return {
+          summary: sourcePayload.summary,
+          feature_count: sourcePayload.feature_count,
+          cells: (sourcePayload.features || []).slice(0, 5).map((f) => f.properties || {}),
+        };
+      }
+
+      if (sourceId === "osm-poi") {
+        return {
+          summary: sourcePayload.summary,
+          feature_count: sourcePayload.feature_count,
+          collections: (sourcePayload.collections || []).slice(0, 8),
+          samples: (sourcePayload.features || []).slice(0, 4).map((f) => f.properties || {}),
+        };
+      }
+
+      if (sourceId === "satellites") {
+        return {
+          summary: sourcePayload.summary,
+          total_tracked: sourcePayload.total_tracked || (sourcePayload.features || []).length,
+          satellites: (sourcePayload.features || []).slice(0, 6).map((f) => f.properties || {}),
+        };
+      }
+
       return sourcePayload;
     }
 
@@ -1645,9 +1841,16 @@
         state.weatherRecord = [...datasets].reverse().find((record) => record.category === "weather") || null;
 
         renderOverlays();
+        renderAgentButtons();
         renderWeather();
         renderFreshness(state.sources);
-        await loadMapData();
+        await Promise.all([
+          loadMapData(),
+          loadPoiMapData(),
+          loadCellTowerMapData(),
+          loadSatelliteMapData(),
+          loadBridgeMapData(),
+        ]);
 
         if (state.selectionGeometry) {
           await inspectSelection(state.selectionGeometry);
@@ -1679,10 +1882,131 @@
       statusLine.textContent = "AOI cleared. Draw a new polygon when ready.";
     }
 
+    const AGENTS_LIST = [
+      { id: "summary-agent", label: "Summary Agent" },
+      { id: "celltower-agent", label: "Cell Tower Agent" },
+      { id: "satellite-agent", label: "Satellite Agent" },
+      { id: "bridge-load-agent", label: "Bridge Load Agent" },
+      { id: "demographics-agent", label: "Demographics Agent" },
+      { id: "forest-concealment-agent", label: "Forest Concealment Agent" },
+      { id: "weather-impact-agent", label: "Weather Impact Agent" },
+      { id: "power-grid-agent", label: "Power Grid Agent" },
+    ];
+
+    function renderAgentButtons() {
+      const container = document.getElementById("agent-buttons");
+      container.innerHTML = "";
+      AGENTS_LIST.forEach((agent) => {
+        const btn = document.createElement("button");
+        btn.className = "btn btn-secondary";
+        btn.style.marginBottom = "6px";
+        btn.textContent = agent.label;
+        btn.dataset.agentId = agent.id;
+        btn.addEventListener("click", () => runAgent(agent.id, btn));
+        container.appendChild(btn);
+      });
+    }
+
+    async function runAgent(agentId, btn) {
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Running...";
+      statusLine.textContent = `Running ${agentId}...`;
+
+      try {
+        const params = new URLSearchParams({ area: state.bootstrapArea, timeframe: state.timeframe });
+        const response = await fetch(`/api/agents/${agentId}/run?${params}`, {
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Agent run failed with ${response.status}`);
+        }
+
+        const result = await response.json();
+        displayAgentRunResult(agentId, result);
+        statusLine.textContent = `${agentId} complete.`;
+      } catch (error) {
+        console.error(`Agent ${agentId} failed:`, error);
+        statusLine.textContent = `${agentId} failed.`;
+        displayAgentRunResult(agentId, { error: error.message || "Agent run failed" });
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+
+    function displayAgentRunResult(agentId, result) {
+      const display = document.getElementById("agent-run-display");
+      const agent = AGENTS_LIST.find((a) => a.id === agentId);
+      const label = agent ? agent.label : agentId;
+
+      const card = document.createElement("div");
+      card.className = "raw-source";
+      card.style.marginBottom = "10px";
+
+      const summary = document.createElement("summary");
+      summary.className = "raw-source-summary";
+
+      const text = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "raw-source-name";
+      title.textContent = `${label} (${new Date().toLocaleTimeString()})`;
+      const copy = document.createElement("div");
+      copy.className = "raw-source-copy";
+      copy.textContent = result.summary || result.error || "No summary";
+      text.appendChild(title);
+      text.appendChild(copy);
+
+      const icon = document.createElement("span");
+      icon.className = "collapse-icon";
+      icon.textContent = "▾";
+
+      summary.appendChild(text);
+      summary.appendChild(icon);
+      card.appendChild(summary);
+
+      if (!result.error) {
+        const body = document.createElement("div");
+        body.className = "raw-source-body";
+
+        if (result.findings && result.findings.length) {
+          const findingsPre = document.createElement("pre");
+          findingsPre.textContent = result.findings.join("\n");
+          body.appendChild(findingsPre);
+        }
+
+        if (result.evidence_bundle && result.evidence_bundle.length) {
+          const evidenceLabel = document.createElement("div");
+          evidenceLabel.className = "bullet-group-label";
+          evidenceLabel.textContent = "Evidence";
+          body.appendChild(evidenceLabel);
+          result.evidence_bundle.slice(0, 5).forEach((ev) => {
+            const evDiv = document.createElement("div");
+            evDiv.className = "bullet-item";
+            evDiv.textContent = `${ev.source_id}: ${ev.detail}`;
+            body.appendChild(evDiv);
+          });
+        }
+
+        card.appendChild(body);
+      }
+
+      display.prepend(card);
+    }
+
     overlayPanelToggle.addEventListener("click", () => {
       overlayPanel.classList.toggle("is-collapsed");
       const expanded = !overlayPanel.classList.contains("is-collapsed");
       overlayPanelToggle.setAttribute("aria-expanded", String(expanded));
+    });
+
+    const agentsPanel = document.getElementById("agents-panel");
+    const agentsPanelToggle = document.getElementById("agents-panel-toggle");
+    agentsPanelToggle.addEventListener("click", () => {
+      agentsPanel.classList.toggle("is-collapsed");
+      const expanded = !agentsPanel.classList.contains("is-collapsed");
+      agentsPanelToggle.setAttribute("aria-expanded", String(expanded));
     });
 
     inspectorSections.forEach((section) => {

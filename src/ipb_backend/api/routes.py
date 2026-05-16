@@ -465,6 +465,128 @@ async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_
     return payload
 
 
+@router.get("/map-data/digiroad")
+async def map_data_digiroad(area: str = Query("North Karelia"), services=Depends(get_services)):
+    records = services["ingestion_service"].records
+    record = next((r for r in records if r.source_id == "digiroad" and r.area == area), None)
+    if record is None:
+        return {"type": "FeatureCollection", "features": [], "available": False}
+    bridge_coll_id = "dr_tielinkki_silta_alikulku_tunneli"
+    collections = record.data.get("collections", {})
+    bridge_data = collections.get(bridge_coll_id, {})
+    label = bridge_data.get("label", "Bridges, underpasses, tunnels")
+    features = []
+    for sample in bridge_data.get("features", []):
+        silta_alik = (sample.get("properties") or {}).get("silta_alik")
+        if silta_alik not in (1, 2, 3):
+            continue
+        if "geometry" in sample and sample["geometry"]:
+            props = dict(sample.get("properties", {}))
+            props["_collection"] = "bridges"
+            props["_label"] = label
+            features.append({
+                "type": "Feature",
+                "geometry": sample["geometry"],
+                "properties": props,
+            })
+    return {"type": "FeatureCollection", "features": features, "available": True, "message": f"{len(features)} bridge/tunnel features"}
+
+
+@router.get("/map-data/opencellid")
+async def map_data_opencellid(area: str = Query("North Karelia"), services=Depends(get_services)):
+    records = services["ingestion_service"].records
+    record = next((r for r in records if r.source_id == "opencellid" and r.area == area), None)
+    if record is None:
+        return {"type": "FeatureCollection", "features": [], "available": False}
+    cells = record.data.get("cells", [])
+    features = []
+    for cell in cells:
+        lat = cell.get("lat")
+        lon = cell.get("lon")
+        if lat is None or lon is None:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            "properties": {
+                "_collection": "celltowers",
+                "_label": "Cell Tower",
+                "cell_id": str(cell.get("cellid") or cell.get("cellId", "")),
+                "radio": cell.get("radio", ""),
+                "mcc": cell.get("mcc", ""),
+                "mnc": cell.get("mnc", ""),
+                "lac": cell.get("lac", ""),
+                "samples": cell.get("samples", ""),
+                "range": cell.get("range", ""),
+            },
+        })
+    return {"type": "FeatureCollection", "features": features, "available": True}
+
+
+@router.get("/map-data/osm-poi")
+async def map_data_osm_poi(area: str = Query("North Karelia"), services=Depends(get_services)):
+    records = services["ingestion_service"].records
+    record = next((r for r in records if r.source_id == "osm-poi" and r.area == area), None)
+    if record is None:
+        return {"type": "FeatureCollection", "features": [], "available": False}
+    categories = record.data.get("categories", {})
+    features = []
+    for cat_id, items in categories.items():
+        label = cat_id.replace("_", " ").title()
+        for item in items:
+            lat = item.get("lat")
+            lon = item.get("lon")
+            if lat is None or lon is None:
+                continue
+            tags = item.get("tags", {})
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": {
+                    "_collection": f"poi-{cat_id}",
+                    "_label": label,
+                    "name": tags.get("name", ""),
+                    "amenity": tags.get("amenity", ""),
+                },
+            })
+    return {"type": "FeatureCollection", "features": features, "available": True}
+
+
+@router.get("/map-data/satellites")
+async def map_data_satellites(area: str = Query("North Karelia"), services=Depends(get_services)):
+    records = services["ingestion_service"].records
+    record = next((r for r in records if r.source_id == "satellites" and r.area == area), None)
+    if record is None:
+        return {"type": "FeatureCollection", "features": [], "available": False}
+    satellites = record.data.get("satellites", {})
+    query = record.data.get("query", {})
+    center_lat = query.get("lat", 62.8)
+    center_lon = query.get("lon", 30.2)
+    features = []
+    for name, info in satellites.items():
+        passes = info.get("predicted_passes", [])
+        next_pass = passes[0] if passes else {}
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [center_lon, center_lat]},
+            "properties": {
+                "_collection": "satellites",
+                "_label": "Satellite",
+                "name": name,
+                "type": info.get("type", ""),
+                "norad_id": info.get("norad_id"),
+                "next_pass": next_pass.get("pass_time_utc", ""),
+                "altitude_km": next_pass.get("altitude_km", ""),
+            },
+        })
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "available": True,
+        "message": f"Tracking {len(features)} reconnaissance/imaging satellites",
+    }
+
+
 @router.get("/weather/point")
 async def weather_point(lat: float = Query(...), lon: float = Query(...), timeframe: str = Query("24h"), services=Depends(get_services)):
     adapter: FmiAdapter = services["adapters"].get("fmi")
