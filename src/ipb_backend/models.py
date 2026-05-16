@@ -56,6 +56,20 @@ class IngestionResult(BaseModel):
     produced_records: list[DatasetRecord]
 
 
+class AoiInspectionRequest(BaseModel):
+    geometry: dict[str, Any]
+    timeframe: str | None = None
+
+
+class AoiInspectionResponse(BaseModel):
+    selection: dict[str, Any]
+    metrics: dict[str, Any]
+    raw_data: dict[str, Any]
+    raw_sections: list[dict[str, Any]]
+    freshness: list[dict[str, Any]]
+    agent: dict[str, Any]
+
+
 class UiLayer(BaseModel):
     layer_id: str
     title: str

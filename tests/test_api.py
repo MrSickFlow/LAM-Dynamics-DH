@@ -1,8 +1,11 @@
 from fastapi.testclient import TestClient
 
+from ipb_backend.analysis.analyzers import OllamaAnalyzer
 from ipb_backend.ingestion.sources.fmi import FmiAdapter
 from ipb_backend.main import app
 from ipb_backend.main import state
+from ipb_backend.models import DatasetRecord, SourceCategory
+from ipb_backend.config import settings
 
 
 client = TestClient(app)
@@ -100,13 +103,30 @@ def test_health_endpoint():
     assert response.json() == {"status": "ok"}
 
 
+def test_analysis_health_endpoint_reports_ollama_model(monkeypatch):
+    async def fake_fetch_tags(self):
+        return {"models": [{"name": settings.ollama_model}, {"name": "other-model"}]}
+
+    monkeypatch.setattr(settings, "analysis_provider", "ollama")
+    monkeypatch.setattr(OllamaAnalyzer, "_fetch_tags", fake_fetch_tags)
+
+    response = client.get("/api/analysis/health")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["provider"] == "ollama"
+    assert payload["status"] == "ready"
+    assert payload["model"] == settings.ollama_model
+    assert payload["model_available"] is True
+
+
 def test_ui_demo_contains_workspace_shell():
     response = client.get("/api/ui-demo")
     assert response.status_code == 200
-    assert "Overlay Settings" in response.text
-    assert "Current Weather" in response.text
-    assert "Data Sources" in response.text
-    assert "Navigation" in response.text
+    assert "Map Overlays" in response.text
+    assert "AOI Metrics" in response.text
+    assert "Agent Interpreter" in response.text
+    assert "Raw Data" in response.text
 
 
 def test_ingestion_flow_for_placeholder_sources():
@@ -123,6 +143,8 @@ def test_ingestion_flow_for_placeholder_sources():
     payload = ingest_response.json()
     assert set(payload["requested_sources"]) == {"nls", "statistics-finland", "digiroad"}
     assert len(payload["produced_records"]) == 3
+    population_record = next(record for record in payload["produced_records"] if record["source_id"] == "statistics-finland")
+    assert population_record["data"]["population_total"] > 50000
 
     datasets_response = client.get("/api/datasets")
     assert datasets_response.status_code == 200
@@ -161,3 +183,200 @@ def test_fmi_ingestion_flow(monkeypatch):
     datasets = datasets_response.json()
     assert len(datasets) == 1
     assert datasets[0]["summary"].startswith("FMI weather observations for North Karelia")
+
+
+def test_aoi_inspection_returns_clipped_source_data():
+    state["ingestion_service"]._records.clear()
+    state["ingestion_service"]._records.extend(
+        [
+            DatasetRecord(
+                source_id="nls",
+                category=SourceCategory.TERRAIN,
+                area="North Karelia",
+                timeframe="72h",
+                summary="NLS test record",
+                data={
+                    "collections": {
+                        "tieviiva": {
+                            "label": "Road network",
+                            "features": [
+                                {
+                                    "type": "Feature",
+                                    "geometry": {
+                                        "type": "LineString",
+                                        "coordinates": [[30.1, 62.5], [30.5, 62.8]],
+                                    },
+                                    "properties": {"name": "Inside road"},
+                                },
+                                {
+                                    "type": "Feature",
+                                    "geometry": {
+                                        "type": "LineString",
+                                        "coordinates": [[29.1, 62.1], [29.2, 62.2]],
+                                    },
+                                    "properties": {"name": "Outside road"},
+                                },
+                            ],
+                        }
+                    }
+                },
+            ),
+            DatasetRecord(
+                source_id="digiroad",
+                category=SourceCategory.INFRASTRUCTURE,
+                area="North Karelia",
+                timeframe="72h",
+                summary="Digiroad test record",
+                data={
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [30.35, 62.62]},
+                            "properties": {"name": "Bridge"},
+                        },
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [29.2, 62.15]},
+                            "properties": {"name": "Outside asset"},
+                        },
+                    ]
+                },
+            ),
+            DatasetRecord(
+                source_id="statistics-finland",
+                category=SourceCategory.DEMOGRAPHICS,
+                area="North Karelia",
+                timeframe="72h",
+                summary="Population test record",
+                data={
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [[[30.0, 62.4], [30.4, 62.4], [30.4, 62.7], [30.0, 62.7], [30.0, 62.4]]],
+                            },
+                            "properties": {"cell_id": "a", "population": 120},
+                        },
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [[[30.3, 62.55], [30.7, 62.55], [30.7, 62.9], [30.3, 62.9], [30.3, 62.55]]],
+                            },
+                            "properties": {"cell_id": "b", "population": 80},
+                        },
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [[[29.0, 62.0], [29.2, 62.0], [29.2, 62.2], [29.0, 62.2], [29.0, 62.0]]],
+                            },
+                            "properties": {"cell_id": "c", "population": 50},
+                        },
+                    ]
+                },
+            ),
+            DatasetRecord(
+                source_id="fmi",
+                category=SourceCategory.WEATHER,
+                area="North Karelia",
+                timeframe="72h",
+                summary="FMI test record",
+                data={
+                    "station": {
+                        "name": "Joensuu Linnunlahti",
+                        "region": "Joensuu",
+                        "latitude": 62.6,
+                        "longitude": 30.3,
+                    },
+                    "observations": {
+                        "temperature": {"latest": {"value": 10.8}},
+                        "wind_speed": {"latest": {"value": 3.4}},
+                    },
+                },
+            ),
+        ]
+    )
+
+    response = client.post(
+        "/api/aoi/inspect",
+        json={
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[30.0, 62.4], [30.6, 62.4], [30.6, 62.85], [30.0, 62.85], [30.0, 62.4]]],
+            },
+            "timeframe": "72h",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metrics"]["nls_feature_count"] == 1
+    assert payload["metrics"]["digiroad_feature_count"] == 1
+    assert payload["metrics"]["population_total"] == 171
+    assert payload["metrics"]["weather_station_count"] == 1
+    assert payload["metrics"]["feature_counts_by_source"]["nls"] == 1
+    assert payload["metrics"]["geometry_counts"]["LineString"] == 1
+    assert payload["raw_data"]["nls"]["collections"][0]["collection"] == "tieviiva"
+    assert payload["raw_data"]["statistics-finland"]["features"][1]["properties"]["population_source"] == 80
+    assert payload["raw_data"]["statistics-finland"]["features"][1]["properties"]["overlap_ratio"] == 0.6429
+    assert payload["raw_data"]["fmi"]["stations"][0]["properties"]["name"] == "Joensuu Linnunlahti"
+    assert payload["raw_sections"][0]["subsections"]
+    assert payload["agent"]["provider"] == "rules"
+    assert payload["agent"]["evidence_bundle"]
+
+
+def test_aoi_inspection_includes_additional_feature_sources():
+    state["ingestion_service"]._records.clear()
+    state["ingestion_service"]._records.extend(
+        [
+            DatasetRecord(
+                source_id="custom-infra",
+                category=SourceCategory.INFRASTRUCTURE,
+                area="North Karelia",
+                timeframe="72h",
+                summary="Custom infrastructure record",
+                data={
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [30.35, 62.62],
+                            },
+                            "properties": {"name": "Tower site"},
+                        },
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [29.1, 62.1],
+                            },
+                            "properties": {"name": "Outside tower"},
+                        },
+                    ]
+                },
+            )
+        ]
+    )
+
+    response = client.post(
+        "/api/aoi/inspect",
+        json={
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[30.0, 62.4], [30.6, 62.4], [30.6, 62.85], [30.0, 62.85], [30.0, 62.4]]],
+            },
+            "timeframe": "72h",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["raw_data"]["custom-infra"]["feature_count"] == 1
+    assert payload["metrics"]["feature_counts_by_source"]["custom-infra"] == 1
+    assert payload["metrics"]["feature_counts_by_category"]["infrastructure"] == 1
+    assert "custom-infra" in payload["metrics"]["active_sources"]
+    assert any(section["source_id"] == "custom-infra" for section in payload["raw_sections"])
+    assert any(item["source_id"] == "custom-infra" for item in payload["agent"]["evidence_bundle"])

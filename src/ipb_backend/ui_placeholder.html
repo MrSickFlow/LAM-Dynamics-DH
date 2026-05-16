@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IPB Operations Workspace</title>
+  <title>IPB AOI Workspace</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
@@ -13,197 +13,735 @@
       --accent: #215347;
       --accent-2: #c46c32;
       --accent-3: #195d85;
-      --line: rgba(20, 38, 29, 0.1);
-      --surface: rgba(246, 242, 233, 0.92);
+      --line: rgba(20, 38, 29, 0.12);
+      --surface: rgba(246, 242, 233, 0.95);
+      --panel: rgba(255, 255, 255, 0.7);
       --bg: #d7e0db;
+      --shadow: 0 18px 40px rgba(20, 38, 29, 0.12);
     }
+
     * { box-sizing: border-box; }
+
     body {
-      margin: 0; height: 100vh; overflow: hidden;
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
       font-family: "Segoe UI", -apple-system, sans-serif;
-      color: var(--ink); background: var(--bg);
-    }
-    .app {
-      display: flex; height: 100vh;
+      color: var(--ink);
+      background: var(--bg);
     }
 
-    /* Map */
+    body.is-drawing {
+      cursor: crosshair;
+      user-select: none;
+    }
+
+    .workspace {
+      display: flex;
+      height: 100vh;
+      min-height: 0;
+    }
+
     .map-panel {
-      flex: 2; min-width: 0; position: relative;
+      position: relative;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
     }
+
     #map {
-      width: 100%; height: 100%;
-    }
-    .map-watermark {
-      position: absolute; bottom: 20px; left: 20px;
-      background: rgba(246,242,233,0.85); backdrop-filter: blur(6px);
-      padding: 8px 14px; border-radius: 12px; font-size: 0.8rem; z-index: 1000;
-      border: 1px solid var(--line); pointer-events: none;
+      width: 100%;
+      height: 100%;
     }
 
-    /* Sidebar */
-    .sidebar {
-      flex: 0 0 380px; overflow-y: auto; padding: 18px 16px;
-      background: var(--surface); backdrop-filter: blur(10px);
-      border-left: 1px solid var(--line);
-      display: flex; flex-direction: column; gap: 14px;
+    .panel-toggle {
+      position: absolute;
+      top: 18px;
+      left: 18px;
+      z-index: 1200;
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      background: rgba(20, 38, 29, 0.86);
+      color: #fff;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: var(--shadow);
     }
-    .sidebar::-webkit-scrollbar { width: 4px; }
-    .sidebar::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 
-    .section {
-      border-radius: 18px; border: 1px solid var(--line);
-      background: rgba(255,255,255,0.5); overflow: hidden;
-    }
-    .section-header {
-      padding: 14px 16px 0;
-      font-size: 0.72rem; letter-spacing: 0.18em; text-transform: uppercase;
-      color: var(--muted); font-weight: 600;
-    }
-    .section-body { padding: 12px 16px 16px; }
+    .panel-toggle:hover { opacity: 0.92; }
 
-    /* Nav */
-    .nav-row {
-      display: flex; gap: 6px; flex-wrap: wrap;
+    .settings-panel {
+      position: absolute;
+      top: 68px;
+      left: 18px;
+      z-index: 1100;
+      width: 320px;
+      max-height: calc(100vh - 160px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--surface);
+      backdrop-filter: blur(12px);
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: transform 180ms ease, opacity 180ms ease;
     }
-    .nav-item {
-      flex: 1; min-width: 70px; padding: 10px 8px; text-align: center;
-      border-radius: 12px; border: 1px solid var(--line);
-      background: rgba(255,255,255,0.6); cursor: pointer;
-      font-size: 0.82rem; transition: all 140ms; text-decoration: none; color: var(--ink);
-    }
-    .nav-item:hover { border-color: var(--accent); background: rgba(33,83,71,0.08); }
-    .nav-item.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-    .nav-item .nav-icon { font-size: 1.2rem; display: block; margin-bottom: 2px; }
 
-    /* Form */
-    .form-row { display: flex; gap: 8px; margin-top: 8px; }
-    .form-row input {
-      flex: 1; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line);
-      background: rgba(255,255,255,0.8); font-size: 0.9rem; min-width: 0;
+    .settings-panel.is-collapsed {
+      transform: translateX(-112%);
+      opacity: 0;
+      pointer-events: none;
     }
+
+    .panel-card {
+      flex: 0 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      background: var(--panel);
+    }
+
+    .panel-card.is-collapsible {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .panel-card-header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .panel-card-header:hover {
+      background: rgba(33, 83, 71, 0.04);
+    }
+
+    .panel-card-header .panel-title {
+      margin: 0;
+    }
+
+    .panel-card-header .collapse-icon {
+      flex-shrink: 0;
+      color: var(--muted);
+      transition: transform 160ms ease;
+    }
+
+    .panel-card.is-collapsed .panel-card-header .collapse-icon {
+      transform: rotate(-90deg);
+    }
+
+    .panel-card-body {
+      padding: 0 14px 14px;
+    }
+
+    .panel-card.is-collapsed .panel-card-body {
+      display: none;
+    }
+
+    .panel-title {
+      margin: 0 0 6px;
+      font-size: 0.8rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .panel-copy {
+      margin: 0 0 12px;
+      font-size: 0.88rem;
+      line-height: 1.4;
+      color: var(--muted);
+    }
+
+    .control-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .control-row input {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.8);
+      font-size: 0.92rem;
+    }
+
     .btn {
-      padding: 10px 16px; border: 0; border-radius: 12px; cursor: pointer;
-      font-size: 0.9rem; font-weight: 600; white-space: nowrap;
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
     }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { opacity: 0.9; }
-    .btn-primary:disabled { opacity: 0.5; cursor: wait; }
 
-    /* Overlay checkboxes */
-    .overlay-list { display: flex; flex-direction: column; gap: 0; }
-    .overlay-scroll { max-height: 340px; overflow-y: auto; }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
 
-    .overlay-category { border-bottom: 1px solid var(--line); }
-    .overlay-category:last-child { border-bottom: none; }
+    .btn-secondary {
+      width: 100%;
+      background: rgba(20, 38, 29, 0.08);
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+
+    .overlay-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .overlay-category {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 6px;
+    }
+
+    .overlay-category:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
 
     .overlay-category-header {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 8px 4px; cursor: pointer; font-size: 0.75rem;
-      font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
-      color: var(--muted); user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 4px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
     }
-    .overlay-category-header:hover { color: var(--ink); }
+
     .overlay-category-header .collapse-icon {
-      transition: transform 180ms; font-size: 0.7rem; line-height: 1;
+      transition: transform 160ms ease;
     }
-    .overlay-category-header.collapsed .collapse-icon { transform: rotate(-90deg); }
-    .overlay-category-body { display: flex; flex-direction: column; gap: 4px; padding: 0 0 4px; }
-    .overlay-category-header.collapsed + .overlay-category-body { display: none; }
+
+    .overlay-category-header.collapsed .collapse-icon {
+      transform: rotate(-90deg);
+    }
+
+    .overlay-category-body {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding-bottom: 6px;
+    }
+
+    .overlay-category-header.collapsed + .overlay-category-body {
+      display: none;
+    }
 
     .overlay-item {
-      display: flex; align-items: center; gap: 10px; padding: 6px 8px;
-      border-radius: 10px; cursor: pointer;
-      transition: background 140ms; font-size: 0.82rem;
-    }
-    .overlay-item:hover { background: rgba(33,83,71,0.06); }
-    .overlay-item input { accent-color: var(--accent); width: 14px; height: 14px; }
-    .overlay-swatch {
-      width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0;
-    }
-
-    /* Weather card */
-    .weather-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .weather-metric {
-      padding: 10px; border-radius: 12px; background: rgba(255,255,255,0.6);
-      border: 1px solid var(--line); text-align: center;
-    }
-    .weather-metric .val { font-size: 1.3rem; font-weight: 700; color: var(--accent-3); }
-    .weather-metric .lbl { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-    .weather-station { font-size: 0.82rem; color: var(--muted); margin-top: 8px; }
-
-    /* Source status */
-    .source-list { display: flex; flex-direction: column; gap: 6px; }
-    .source-row {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 8px;
+      border-radius: 12px;
+      cursor: pointer;
       font-size: 0.84rem;
     }
-    .source-dot {
-      width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px;
-    }
-    .source-dot.ready { background: #2a8; }
-    .source-dot.error { background: #d44; }
-    .source-dot.idle { background: #aaa; }
 
-    /* Status bar */
+    .overlay-item:hover {
+      background: rgba(33, 83, 71, 0.06);
+    }
+
+    .overlay-item input {
+      accent-color: var(--accent);
+      width: 15px;
+      height: 15px;
+    }
+
+    .overlay-swatch {
+      width: 9px;
+      height: 9px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .map-watermark,
+    .draw-hint {
+      position: absolute;
+      left: 18px;
+      z-index: 1000;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(246, 242, 233, 0.9);
+      backdrop-filter: blur(10px);
+      box-shadow: var(--shadow);
+    }
+
+    .map-watermark {
+      bottom: 18px;
+      padding: 10px 14px;
+      font-size: 0.8rem;
+    }
+
+    .draw-hint {
+      bottom: 74px;
+      padding: 10px 14px;
+      max-width: 320px;
+      font-size: 0.84rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .inspector {
+      flex: 0 0 430px;
+      height: 100vh;
+      min-width: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+      padding: 18px 16px;
+      background: var(--surface);
+      backdrop-filter: blur(14px);
+      border-left: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .inspector::-webkit-scrollbar,
+    .settings-panel::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    .inspector::-webkit-scrollbar-thumb,
+    .settings-panel::-webkit-scrollbar-thumb {
+      background: var(--line);
+      border-radius: 999px;
+    }
+
+    .section {
+      flex: 0 0 auto;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.58);
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .section-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .section-toggle:hover {
+      background: rgba(33, 83, 71, 0.04);
+    }
+
+    .section-header {
+      font-size: 0.72rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .section-toggle .collapse-icon {
+      flex-shrink: 0;
+      color: var(--muted);
+      transition: transform 160ms ease;
+    }
+
+    .section.is-collapsed .section-toggle .collapse-icon {
+      transform: rotate(-90deg);
+    }
+
+    .section-body {
+      padding: 12px 16px 16px;
+      min-width: 0;
+    }
+
+    .section.is-collapsed .section-body {
+      display: none;
+    }
+
+    .headline {
+      margin: 0;
+      font-size: 1.55rem;
+      line-height: 1.1;
+    }
+
+    .subhead {
+      margin: 6px 0 0;
+      font-size: 0.92rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .metric-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .metric-value {
+      font-size: 1.32rem;
+      font-weight: 700;
+      color: var(--accent-3);
+    }
+
+    .metric-label {
+      margin-top: 2px;
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .selection-meta {
+      margin-top: 10px;
+      font-size: 0.86rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .agent-summary {
+      margin: 0;
+      font-size: 0.96rem;
+      line-height: 1.5;
+    }
+
+    .agent-meta,
+    .agent-limitations {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .agent-chip {
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.78);
+      font-size: 0.76rem;
+      line-height: 1;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .agent-chip.is-ready {
+      color: #215347;
+      border-color: rgba(33, 83, 71, 0.18);
+      background: rgba(33, 83, 71, 0.08);
+    }
+
+    .agent-chip.is-warning {
+      color: #8b5f14;
+      border-color: rgba(139, 95, 20, 0.18);
+      background: rgba(196, 168, 50, 0.12);
+    }
+
+    .agent-chip.is-error {
+      color: #8a2d21;
+      border-color: rgba(138, 45, 33, 0.18);
+      background: rgba(196, 108, 50, 0.12);
+    }
+
+    .bullet-group-label {
+      margin-top: 12px;
+      font-size: 0.74rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .bullet-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .bullet-item {
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+
+    .freshness-list,
+    .raw-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .freshness-row,
+    .raw-card {
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+      padding: 12px;
+      min-width: 0;
+    }
+
+    .freshness-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 0.86rem;
+      line-height: 1.4;
+    }
+
+    .source-name {
+      font-weight: 600;
+    }
+
+    .source-status {
+      color: var(--muted);
+      text-transform: capitalize;
+    }
+
+    .raw-title {
+      margin: 0 0 8px;
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .raw-source {
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+      overflow: hidden;
+    }
+
+    .raw-source + .raw-source {
+      margin-top: 10px;
+    }
+
+    .raw-source summary,
+    .raw-subsection summary {
+      list-style: none;
+      cursor: pointer;
+    }
+
+    .raw-source summary::-webkit-details-marker,
+    .raw-subsection summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .raw-source-summary {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 14px;
+    }
+
+    .raw-source-summary:hover,
+    .raw-subsection-summary:hover {
+      background: rgba(33, 83, 71, 0.05);
+    }
+
+    .raw-source-name {
+      font-size: 0.94rem;
+      font-weight: 700;
+    }
+
+    .raw-source-copy {
+      margin-top: 4px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .raw-source-summary .collapse-icon,
+    .raw-subsection-summary .collapse-icon {
+      flex-shrink: 0;
+      color: var(--muted);
+      transition: transform 160ms ease;
+    }
+
+    .raw-source[open] .raw-source-summary .collapse-icon,
+    .raw-subsection[open] .raw-subsection-summary .collapse-icon {
+      transform: rotate(180deg);
+    }
+
+    .raw-source-body {
+      padding: 0 14px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .raw-subsection {
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(20, 38, 29, 0.03);
+      overflow: hidden;
+    }
+
+    .raw-subsection-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .raw-subsection-body {
+      padding: 0 12px 12px;
+    }
+
+    .raw-card pre {
+      margin: 0;
+      padding: 10px;
+      border-radius: 12px;
+      background: rgba(20, 38, 29, 0.06);
+      color: var(--ink);
+      font-size: 0.77rem;
+      line-height: 1.45;
+      max-height: 240px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .empty-state {
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
     .status-bar {
-      padding: 6px 0 0; font-size: 0.75rem; color: var(--muted); text-align: center;
+      flex: 0 0 auto;
+      padding: 4px 2px 0;
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: center;
     }
 
-    @media (max-width: 800px) {
-      .app { flex-direction: column; }
-      .map-panel { flex: 1; min-height: 50vh; }
-      .sidebar { flex: 0 0 auto; max-height: 50vh; border-left: none; border-top: 1px solid var(--line); }
+    @media (max-width: 980px) {
+      .workspace {
+        flex-direction: column;
+      }
+
+      .inspector {
+        flex: 0 0 auto;
+        width: 100%;
+        height: auto;
+        max-height: 46vh;
+        border-left: none;
+        border-top: 1px solid var(--line);
+      }
+
+      .settings-panel {
+        width: min(320px, calc(100vw - 36px));
+      }
     }
   </style>
 </head>
 <body>
-  <div class="app">
+  <div class="workspace">
     <div class="map-panel">
       <div id="map"></div>
-      <div class="map-watermark" id="map-watermark">Area: <strong id="map-area-label">North Karelia</strong></div>
-    </div>
+      <button class="panel-toggle" id="settings-toggle" type="button" aria-expanded="true">Map Settings</button>
 
-    <aside class="sidebar" id="sidebar">
-      <!-- Navigation -->
-      <div class="section">
-        <div class="section-header">Navigation</div>
-        <div class="section-body">
-          <div class="nav-row">
-            <a class="nav-item active" href="#"><span class="nav-icon">🗺️</span>Map</a>
-            <a class="nav-item" href="#"><span class="nav-icon">🌤️</span>Weather</a>
-            <a class="nav-item" href="#"><span class="nav-icon">📊</span>Analysis</a>
-            <a class="nav-item" href="#"><span class="nav-icon">📋</span>Reports</a>
+      <aside class="settings-panel" id="settings-panel">
+        <div class="panel-card">
+          <div class="panel-title">Selection Mode</div>
+          <p class="panel-copy">Shift + left-click and hold on the map to draw an area of interest. The right-hand inspector updates from that polygon.</p>
+          <div class="control-row">
+            <input id="timeframe-input" name="timeframe" value="72h" placeholder="Timeframe" />
+            <button class="btn btn-primary" id="refresh-btn" type="button">Refresh Data</button>
+          </div>
+          <button class="btn btn-secondary" id="clear-selection-btn" type="button">Clear AOI Selection</button>
+        </div>
+
+        <div class="panel-card is-collapsible" id="overlay-panel">
+          <button class="panel-card-header" id="overlay-panel-toggle" type="button" aria-expanded="true">
+            <div class="panel-title">Map Overlays</div>
+            <span class="collapse-icon">▾</span>
+          </button>
+          <div class="panel-card-body" id="overlay-panel-body">
+            <div class="overlay-list" id="overlay-controls"></div>
           </div>
         </div>
-      </div>
+      </aside>
 
-      <!-- Area Controls -->
+      <div class="draw-hint" id="draw-hint">Shift + drag creates a polygon AOI. The map stays as the cursor, and all extracted information appears on the right.</div>
+      <div class="map-watermark">Selection: <strong id="selection-label">No AOI selected</strong></div>
+    </div>
+
+    <aside class="inspector">
       <div class="section">
-        <div class="section-header">Area</div>
         <div class="section-body">
-          <form id="scenario-form">
-            <input id="area-input" name="area" value="North Karelia" placeholder="Area" />
-            <div class="form-row">
-              <input id="timeframe-input" name="timeframe" value="72h" placeholder="Timeframe" />
-              <button class="btn btn-primary" id="refresh-btn" type="submit">Refresh</button>
-            </div>
-          </form>
+          <h1 class="headline">AOI Inspector</h1>
+          <p class="subhead">Raw source data, source freshness, and a grounded agent interpretation all track the polygon you draw on the map.</p>
         </div>
       </div>
 
-      <!-- Overlay Settings -->
-      <div class="section">
-        <div class="section-header">Overlay Settings</div>
-        <div class="section-body overlay-scroll">
-          <div class="overlay-list" id="overlay-controls"></div>
+      <div class="section is-collapsible" data-section>
+        <button class="section-toggle" type="button" aria-expanded="true">
+          <div class="section-header">AOI Metrics</div>
+          <span class="collapse-icon">▾</span>
+        </button>
+        <div class="section-body">
+          <div class="metrics-grid" id="metrics-grid"></div>
+          <div class="selection-meta" id="selection-meta">Draw an AOI to inspect intersecting source data.</div>
         </div>
       </div>
 
-      <!-- Weather -->
-      <div class="section">
-        <div class="section-header">Current Weather</div>
+      <div class="section is-collapsible" data-section>
+        <button class="section-toggle" type="button" aria-expanded="true">
+          <div class="section-header">Agent Interpreter</div>
+          <span class="collapse-icon">▾</span>
+        </button>
         <div class="section-body">
           <div class="weather-grid" id="weather-grid">
             <div class="weather-metric"><div class="val" id="w-temp">--</div><div class="lbl">Temp</div></div>
@@ -214,129 +752,82 @@
             <div class="weather-metric"><div class="val" id="w-cloud">--</div><div class="lbl">Cloud</div></div>
           </div>
           <div class="weather-station" id="w-station">No weather data loaded</div>
+          <p class="agent-summary" id="agent-summary">Awaiting an AOI. The grounded agent summary will cite the intersecting evidence bundle here.</p>
+          <div class="agent-meta" id="agent-meta"></div>
+          <div class="bullet-list" id="agent-findings"></div>
+          <div class="agent-limitations" id="agent-limitations"></div>
+          <div class="bullet-list" id="agent-evidence"></div>
         </div>
       </div>
 
-      <!-- Source Status -->
-      <div class="section">
-        <div class="section-header">Data Sources</div>
+      <div class="section is-collapsible" data-section>
+        <button class="section-toggle" type="button" aria-expanded="true">
+          <div class="section-header">Source Freshness</div>
+          <span class="collapse-icon">▾</span>
+        </button>
         <div class="section-body">
-          <div class="source-list" id="source-list"></div>
+          <div class="freshness-list" id="freshness-list"></div>
         </div>
       </div>
 
-      <div class="status-bar" id="status-line">Loading...</div>
+      <div class="section raw-section is-collapsible" data-section>
+        <button class="section-toggle" type="button" aria-expanded="true">
+          <div class="section-header">Raw Data</div>
+          <span class="collapse-icon">▾</span>
+        </button>
+        <div class="section-body">
+          <div class="raw-list" id="raw-data"></div>
+        </div>
+      </div>
+
+      <div class="status-bar" id="status-line">Bootstrapping datasets...</div>
     </aside>
   </div>
 
   <script>
     const state = {
-      area: "North Karelia", timeframe: "72h",
-      map: null, collectionLayers: {}, layers: [],
-      sources: [], weatherRecord: null,
-      weatherMarker: null, pointMarker: null,
-      weatherPickerActive: false, pointWeatherData: null,
+      bootstrapArea: "North Karelia",
+      timeframe: "72h",
+      map: null,
+      collectionLayers: {},
+      sources: [],
+      weatherRecord: null,
+      weatherMarker: null,
+    pointMarker: null,
+    weatherPickerActive: false,
+    pointWeatherData: null,
+      selectionLayer: null,
+      selectionGeometry: null,
+      latestInspection: null,
+      analysisHealth: null,
+      draw: {
+        active: false,
+        points: [],
+        line: null,
+        polygon: null,
+      },
     };
 
-    const form = document.getElementById("scenario-form");
-    const areaInput = document.getElementById("area-input");
     const timeframeInput = document.getElementById("timeframe-input");
     const refreshBtn = document.getElementById("refresh-btn");
+    const clearSelectionBtn = document.getElementById("clear-selection-btn");
     const overlayControls = document.getElementById("overlay-controls");
-    const sourceListEl = document.getElementById("source-list");
+    const selectionLabel = document.getElementById("selection-label");
+    const metricsGrid = document.getElementById("metrics-grid");
+    const selectionMeta = document.getElementById("selection-meta");
+    const agentSummary = document.getElementById("agent-summary");
+    const agentMeta = document.getElementById("agent-meta");
+    const agentFindings = document.getElementById("agent-findings");
+    const agentLimitations = document.getElementById("agent-limitations");
+    const agentEvidence = document.getElementById("agent-evidence");
+    const freshnessList = document.getElementById("freshness-list");
+    const rawData = document.getElementById("raw-data");
     const statusLine = document.getElementById("status-line");
-
-    function getCenter(area) {
-      const a = area.toLowerCase();
-      if (a.includes("north karelia")) return [62.8, 30.2];
-      if (a.includes("lapland") || a.includes("kasivarren")) return [69.0, 21.5];
-      if (a.includes("archipelago") || a.includes("saaristomeri")) return [60.2, 22.0];
-      return [62.8, 30.2];
-    }
-
-    const COLL_STYLE = {
-      tieviiva: { color: "#c46c32", weight: 2, fill: false },
-      rakennus: { color: "#195d85", weight: 1.5, fillOpacity: 0.45 },
-      jarvi: { color: "#215347", weight: 1, fillOpacity: 0.15 },
-      meri: { color: "#215347", weight: 1, fillOpacity: 0.15 },
-      virtavesialue: { color: "#215347", weight: 1.5, fill: false },
-      korkeuskayra: { color: "#5a6a61", weight: 1, fill: false },
-      suo: { color: "#5a6a61", weight: 1, fillOpacity: 0.15 },
-      kallioalue: { color: "#5a6a61", weight: 1, fillOpacity: 0.1 },
-      metsamaankasvillisuus: { color: "#2a8a5c", weight: 1, fillOpacity: 0.15 },
-      maatalousmaa: { color: "#c4a832", weight: 1, fillOpacity: 0.15 },
-      taajaanrakennettualue: { color: "#195d85", weight: 1.5, fillOpacity: 0.4 },
-      rautatie: { color: "#c46c32", weight: 1.5, fill: false },
-      sahkolinja: { color: "#c46c32", weight: 1, fill: false, dashArray: "6,4" },
-      paikannimi: { point: true, color: "#c46c32" },
-      kunta: { color: "#195d85", weight: 2, fillOpacity: 0.1 },
-      kunnanhallintoraja: { color: "#195d85", weight: 1.5, dashArray: "4,4", fill: false },
-      luonnonsuojelualue: { color: "#2a8a5c", weight: 1, fillOpacity: 0.08 },
-      lentokenttaalue: { color: "#888", weight: 1, fillOpacity: 0.1 },
-      satamaalue: { color: "#215347", weight: 1, fillOpacity: 0.1 },
-      rautatieliikennepaikka: { point: true, color: "#c46c32" },
-      osoitepiste: { point: true, color: "#888" },
-    };
-
-    function initMap() {
-      state.map = L.map("map", { zoomControl: true }).setView(getCenter(state.area), 9);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">OSM</a>', maxZoom: 18,
-      }).addTo(state.map);
-
-      state.map.on("click", async (e) => {
-        if (!state.weatherPickerActive) return;
-        const { lat, lng } = e.latlng;
-        await fetchPointWeather(lat, lng);
-      });
-
-      NLS_COLLECTIONS.forEach((coll) => {
-        const style = COLL_STYLE[coll.id] || { color: "#888", weight: 1 };
-        const layer = L.geoJSON(null, {
-          style: style.point ? undefined : style,
-          pointToLayer: (f, ll) => {
-            const c = style.color || "#888";
-            return L.circleMarker(ll, { radius: 5, fillColor: c, color: "#fff", weight: 1, fillOpacity: 0.8 });
-          },
-          onEachFeature: (f, layer) => {
-            const p = f.properties || {};
-            const name = p.nimi || p.namn || "";
-            layer.bindPopup(`<b>${coll.label}</b>${name ? `<br>${name}` : ""}`);
-          },
-        });
-        state.collectionLayers[coll.id] = layer;
-      });
-    }
-
-    async function loadMapData() {
-      try {
-        const resp = await fetch(`/api/map-data/nls?area=${encodeURIComponent(state.area)}`);
-        const geojson = await resp.json();
-        // Clear all collection layers
-        Object.values(state.collectionLayers).forEach((l) => l.clearLayers());
-        // Group features by _collection and add to respective layer
-        const grouped = {};
-        geojson.features.forEach((f) => {
-          const coll = f.properties?._collection;
-          if (coll) {
-            if (!grouped[coll]) grouped[coll] = [];
-            grouped[coll].push(f);
-          }
-        });
-        let total = 0;
-        Object.entries(grouped).forEach(([coll, features]) => {
-          const layer = state.collectionLayers[coll];
-          if (layer) {
-            layer.addData({ type: "FeatureCollection", features });
-            total += features.length;
-            // Show on map if its overlay checkbox is checked
-            const cb = document.querySelector(`input[data-collection="${coll}"]`);
-            if (!cb || cb.checked) layer.addTo(state.map);
-          }
-        });
-        statusLine.textContent = `Synced. ${total} features on map.`;
-      } catch (e) { console.error("Map data load failed:", e); }
-    }
+    const settingsPanel = document.getElementById("settings-panel");
+    const settingsToggle = document.getElementById("settings-toggle");
+    const overlayPanel = document.getElementById("overlay-panel");
+    const overlayPanelToggle = document.getElementById("overlay-panel-toggle");
+    const inspectorSections = document.querySelectorAll("[data-section]");
 
     const NLS_COLLECTIONS = [
       { id: "tieviiva", label: "Road network", color: "#c46c32" },
@@ -382,8 +873,204 @@
       },
     ];
 
-    const collMap = {};
-    NLS_COLLECTIONS.forEach((c) => { collMap[c.id] = c; });
+    const COLL_STYLE = {
+      tieviiva: { color: "#c46c32", weight: 2, fill: false },
+      rakennus: { color: "#195d85", weight: 1.5, fillOpacity: 0.45 },
+      jarvi: { color: "#215347", weight: 1, fillOpacity: 0.15 },
+      meri: { color: "#215347", weight: 1, fillOpacity: 0.15 },
+      virtavesialue: { color: "#215347", weight: 1.5, fill: false },
+      korkeuskayra: { color: "#5a6a61", weight: 1, fill: false },
+      suo: { color: "#5a6a61", weight: 1, fillOpacity: 0.15 },
+      kallioalue: { color: "#5a6a61", weight: 1, fillOpacity: 0.1 },
+      metsamaankasvillisuus: { color: "#2a8a5c", weight: 1, fillOpacity: 0.15 },
+      maatalousmaa: { color: "#c4a832", weight: 1, fillOpacity: 0.15 },
+      taajaanrakennettualue: { color: "#195d85", weight: 1.5, fillOpacity: 0.4 },
+      rautatie: { color: "#c46c32", weight: 1.5, fill: false },
+      sahkolinja: { color: "#c46c32", weight: 1, fill: false, dashArray: "6,4" },
+      paikannimi: { point: true, color: "#c46c32" },
+      kunta: { color: "#195d85", weight: 2, fillOpacity: 0.1 },
+      kunnanhallintoraja: { color: "#195d85", weight: 1.5, dashArray: "4,4", fill: false },
+      luonnonsuojelualue: { color: "#2a8a5c", weight: 1, fillOpacity: 0.08 },
+      lentokenttaalue: { color: "#888", weight: 1, fillOpacity: 0.1 },
+      satamaalue: { color: "#215347", weight: 1, fillOpacity: 0.1 },
+      rautatieliikennepaikka: { point: true, color: "#c46c32" },
+      osoitepiste: { point: true, color: "#888" },
+    };
+
+    function getCenter(area) {
+      const normalized = area.toLowerCase();
+      if (normalized.includes("north karelia")) return [62.8, 30.2];
+      if (normalized.includes("lapland") || normalized.includes("kasivarren")) return [69.0, 21.5];
+      if (normalized.includes("archipelago") || normalized.includes("saaristomeri")) return [60.2, 22.0];
+      return [62.8, 30.2];
+    }
+
+    function wirePanelScrolling(element) {
+      element.addEventListener("wheel", (event) => {
+        if (element.scrollHeight <= element.clientHeight) return;
+
+        element.scrollTop += event.deltaY;
+        event.preventDefault();
+        event.stopPropagation();
+      }, { passive: false });
+    }
+
+    function initMap() {
+      state.map = L.map("map", {
+        zoomControl: true,
+        boxZoom: false,
+      }).setView(getCenter(state.bootstrapArea), 9);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 18,
+      }).addTo(state.map);
+
+      NLS_COLLECTIONS.forEach((collection) => {
+        const style = COLL_STYLE[collection.id] || { color: "#888", weight: 1 };
+        const layer = L.geoJSON(null, {
+          style: style.point ? undefined : style,
+          pointToLayer: (_, latlng) => L.circleMarker(latlng, {
+            radius: 5,
+            fillColor: style.color || "#888",
+            color: "#fff",
+            weight: 1,
+            fillOpacity: 0.82,
+          }),
+          onEachFeature: (feature, layerRef) => {
+            const props = feature.properties || {};
+            const name = props.nimi || props.namn || props.name || "";
+            layerRef.bindPopup(`<b>${collection.label}</b>${name ? `<br>${name}` : ""}`);
+          },
+        });
+        state.collectionLayers[collection.id] = layer;
+      });
+
+      L.DomEvent.disableClickPropagation(settingsPanel);
+      L.DomEvent.disableScrollPropagation(settingsPanel);
+      wirePanelScrolling(settingsPanel);
+
+      initFreehandSelection();
+    }
+
+    function initFreehandSelection() {
+      state.map.on("mousedown", (event) => {
+        const original = event.originalEvent;
+        if (!original.shiftKey || original.button !== 0) return;
+
+        original.preventDefault();
+        startDrawing(event.latlng);
+      });
+
+      state.map.on("mousemove", (event) => {
+        if (!state.draw.active) return;
+        appendDrawPoint(event.latlng);
+      });
+
+      document.addEventListener("mouseup", () => {
+        if (state.draw.active) finishDrawing();
+      });
+    }
+
+    function startDrawing(latlng) {
+      clearDrawPreview();
+      state.draw.active = true;
+      state.draw.points = [latlng];
+      state.map.dragging.disable();
+      state.map.boxZoom.disable();
+      document.body.classList.add("is-drawing");
+
+      state.draw.line = L.polyline([latlng], {
+        color: "#c46c32",
+        weight: 2,
+        opacity: 0.9,
+        dashArray: "6,6",
+        interactive: false,
+      }).addTo(state.map);
+      statusLine.textContent = "Drawing AOI... release the mouse to inspect the polygon.";
+    }
+
+    function appendDrawPoint(latlng) {
+      const points = state.draw.points;
+      const last = points[points.length - 1];
+      if (last && distancePx(last, latlng) < 6) return;
+
+      points.push(latlng);
+      state.draw.line.setLatLngs(points);
+      if (points.length >= 3) {
+        if (!state.draw.polygon) {
+          state.draw.polygon = L.polygon(points, {
+            color: "#c46c32",
+            weight: 2,
+            fillColor: "#c46c32",
+            fillOpacity: 0.16,
+            interactive: false,
+          }).addTo(state.map);
+        } else {
+          state.draw.polygon.setLatLngs(points);
+        }
+      }
+    }
+
+    function finishDrawing() {
+      const points = [...state.draw.points];
+      state.draw.active = false;
+      state.map.dragging.enable();
+      state.map.boxZoom.disable();
+      document.body.classList.remove("is-drawing");
+
+      if (points.length < 3) {
+        clearDrawPreview();
+        statusLine.textContent = "AOI ignored. Shift + drag a larger polygon with at least three points.";
+        return;
+      }
+
+      const geometry = latLngsToPolygon(points);
+      clearDrawPreview();
+
+      if (state.selectionLayer) {
+        state.map.removeLayer(state.selectionLayer);
+      }
+      state.selectionLayer = L.geoJSON({ type: "Feature", geometry }, {
+        style: {
+          color: "#c46c32",
+          weight: 2.5,
+          fillColor: "#c46c32",
+          fillOpacity: 0.18,
+        },
+      }).addTo(state.map);
+      state.selectionGeometry = geometry;
+      selectionLabel.textContent = "AOI selected";
+      inspectSelection(geometry);
+    }
+
+    function clearDrawPreview() {
+      if (state.map && state.draw.line) state.map.removeLayer(state.draw.line);
+      if (state.map && state.draw.polygon) state.map.removeLayer(state.draw.polygon);
+      state.draw.line = null;
+      state.draw.polygon = null;
+      state.draw.points = [];
+    }
+
+    function distancePx(a, b) {
+      const aPoint = state.map.latLngToContainerPoint(a);
+      const bPoint = state.map.latLngToContainerPoint(b);
+      return aPoint.distanceTo(bPoint);
+    }
+
+    function latLngsToPolygon(latlngs) {
+      const coordinates = latlngs.map((latlng) => [latlng.lng, latlng.lat]);
+      if (coordinates.length) {
+        const first = coordinates[0];
+        const last = coordinates[coordinates.length - 1];
+        if (first[0] !== last[0] || first[1] !== last[1]) {
+          coordinates.push(first);
+        }
+      }
+      return {
+        type: "Polygon",
+        coordinates: [coordinates],
+      };
+    }
 
     function toggleCategory(header) {
       header.classList.toggle("collapsed");
@@ -391,24 +1078,23 @@
 
     function renderOverlays() {
       overlayControls.innerHTML = "";
-      const allOpen = localStorage.getItem("overlay_cats") === "all";
+      const collectionLookup = Object.fromEntries(NLS_COLLECTIONS.map((collection) => [collection.id, collection]));
 
-      OVERLAY_CATEGORIES.forEach((cat, idx) => {
-        const wrap = document.createElement("div");
-        wrap.className = "overlay-category";
+      OVERLAY_CATEGORIES.forEach((category, index) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "overlay-category";
 
         const header = document.createElement("div");
         header.className = "overlay-category-header";
-        header.innerHTML = `<span>${cat.name}</span><span class="collapse-icon">▾</span>`;
+        header.innerHTML = `<span>${category.name}</span><span class="collapse-icon">▾</span>`;
+        if (index !== 0) header.classList.add("collapsed");
         header.addEventListener("click", () => toggleCategory(header));
-        wrap.appendChild(header);
+        wrapper.appendChild(header);
 
         const body = document.createElement("div");
         body.className = "overlay-category-body";
-        // First category open by default, rest collapsed
-        if (idx !== 0) header.classList.add("collapsed");
 
-        if (cat.weatherToggle) {
+        if (category.weatherToggle) {
           const el = document.createElement("label");
           el.className = "overlay-item";
           el.innerHTML = `
@@ -438,60 +1124,74 @@
           body.appendChild(pickerEl);
         }
 
-        cat.ids.forEach((id) => {
-          const coll = collMap[id];
-          if (!coll) return;
-          const el = document.createElement("label");
-          el.className = "overlay-item";
-          el.innerHTML = `
-            <input type="checkbox" checked data-collection="${coll.id}" />
-            <span class="overlay-swatch" style="background:${coll.color}"></span>
-            <span>${coll.label}</span>
-          `;
-          el.querySelector("input").addEventListener("change", toggleOverlay);
-          body.appendChild(el);
+        category.ids.forEach((id) => {
+          const collection = collectionLookup[id];
+          if (collection) body.appendChild(buildOverlayControl(collection));
         });
 
-        wrap.appendChild(body);
-        overlayControls.appendChild(wrap);
+        wrapper.appendChild(body);
+        overlayControls.appendChild(wrapper);
       });
     }
 
-    function toggleOverlay(e) {
-      const id = e.target.dataset.collection;
+    function buildOverlayControl(item) {
+      const label = document.createElement("label");
+      label.className = "overlay-item";
+      label.innerHTML = `
+        <input type="checkbox" checked data-collection="${item.id}" />
+        <span class="overlay-swatch" style="background:${item.color}"></span>
+        <span>${item.label}</span>
+      `;
+      label.querySelector("input").addEventListener("change", toggleOverlay);
+      return label;
+    }
+
+    function toggleOverlay(event) {
+      const id = event.target.dataset.collection;
       if (id === "weather") {
         if (!state.weatherMarker) return;
-        if (e.target.checked) {
+        if (event.target.checked) {
           state.weatherMarker.addTo(state.map);
         } else {
           state.map.removeLayer(state.weatherMarker);
         }
         return;
       }
-      const layer = state.collectionLayers?.[id];
+
+      const layer = state.collectionLayers[id];
       if (!layer) return;
-      if (e.target.checked) {
+      if (event.target.checked) {
         layer.addTo(state.map);
       } else {
         state.map.removeLayer(layer);
       }
     }
 
-    function renderSources() {
-      sourceListEl.innerHTML = "";
-      if (!state.sources.length) {
-        sourceListEl.innerHTML = '<div class="source-row" style="color:var(--muted)">No sources loaded</div>';
-        return;
+    async function loadMapData() {
+      try {
+        const response = await fetch(`/api/map-data/nls?area=${encodeURIComponent(state.bootstrapArea)}`);
+        const geojson = await response.json();
+        Object.values(state.collectionLayers).forEach((layer) => layer.clearLayers());
+
+        const grouped = {};
+        geojson.features.forEach((feature) => {
+          const collection = feature.properties?._collection;
+          if (!collection) return;
+          if (!grouped[collection]) grouped[collection] = [];
+          grouped[collection].push(feature);
+        });
+
+        Object.entries(grouped).forEach(([collection, features]) => {
+          const layer = state.collectionLayers[collection];
+          if (!layer) return;
+          layer.addData({ type: "FeatureCollection", features });
+          const checkbox = document.querySelector(`input[data-collection="${collection}"]`);
+          if (!checkbox || checkbox.checked) layer.addTo(state.map);
+        });
+      } catch (error) {
+        console.error("Map data load failed:", error);
+        statusLine.textContent = "Base NLS overlays could not be refreshed.";
       }
-      state.sources.forEach((s) => {
-        const row = document.createElement("div");
-        row.className = "source-row";
-        row.innerHTML = `
-          <span><span class="source-dot ${s.status}"></span>${s.name}</span>
-          <span style="font-size:0.75rem;color:var(--muted)">${s.status}</span>
-        `;
-        sourceListEl.appendChild(row);
-      });
     }
 
     async function fetchPointWeather(lat, lng) {
@@ -575,66 +1275,387 @@
       }
     }
 
-    async function ingest() {
-      refreshBtn.disabled = true;
-      refreshBtn.textContent = "Ingesting...";
-      statusLine.textContent = `Ingesting data for ${state.area}...`;
-      try {
-        await fetch("/api/ingest", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ area: state.area, timeframe: state.timeframe }),
-        });
-      } catch (e) { console.error(e); }
-      refreshBtn.disabled = false;
-      refreshBtn.textContent = "Refresh";
+    function renderMetrics(metrics) {
+      const items = [
+        { label: "AOI Area", value: metrics ? `${metrics.selection_area_sqkm} km2` : "--" },
+        { label: "NLS Features", value: metrics ? metrics.nls_feature_count : "--" },
+        { label: "Transport", value: metrics ? metrics.digiroad_feature_count : "--" },
+        { label: "Population", value: metrics ? metrics.population_total : "--" },
+        { label: "Weather Stations", value: metrics ? metrics.weather_station_count : "--" },
+      ];
+
+      metricsGrid.innerHTML = "";
+      items.forEach((item) => {
+        const card = document.createElement("div");
+        card.className = "metric-card";
+        card.innerHTML = `<div class="metric-value">${item.value}</div><div class="metric-label">${item.label}</div>`;
+        metricsGrid.appendChild(card);
+      });
     }
 
-    async function loadWorkspace() {
-      if (!state.map) initMap();
-      document.getElementById("map-area-label").textContent = state.area;
-      statusLine.textContent = `Auto-ingesting data for ${state.area}...`;
-      state.pointWeatherData = null;
-      state.weatherPickerActive = false;
-      if (state.pointMarker) { state.map.removeLayer(state.pointMarker); state.pointMarker = null; }
+    function renderFreshness(freshness) {
+      freshnessList.innerHTML = "";
+      if (!freshness?.length) {
+        freshnessList.innerHTML = '<div class="empty-state">Source freshness will appear after datasets load.</div>';
+        return;
+      }
 
-      try {
-        await fetch("/api/ingest", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ area: state.area, timeframe: state.timeframe }),
+      freshness.forEach((source) => {
+        const row = document.createElement("div");
+        row.className = "freshness-row";
+        const refreshed = source.retrieved_at || source.last_successful_refresh || "Not yet refreshed";
+        row.innerHTML = `
+          <div>
+            <div class="source-name">${source.name}</div>
+            <div>${refreshed}</div>
+          </div>
+          <div class="source-status">${source.status}</div>
+        `;
+        freshnessList.appendChild(row);
+      });
+    }
+
+    function chipToneForStatus(status) {
+      if (status === "ready") return "is-ready";
+      if (status === "disabled" || status === "degraded" || status === "fallback") return "is-warning";
+      if (status === "error") return "is-error";
+      return "";
+    }
+
+    function renderAgentMeta(agent, health) {
+      agentMeta.innerHTML = "";
+      const chips = [];
+      const provider = agent?.provider || health?.provider;
+      const model = agent?.model || health?.model;
+      const status = agent?.status || health?.status;
+
+      if (provider) chips.push({ label: `Provider: ${provider}` });
+      if (model) chips.push({ label: `Model: ${model}` });
+      if (status) chips.push({ label: `Status: ${status}`, tone: chipToneForStatus(status) });
+      if (health?.reachable === false) chips.push({ label: "Endpoint unreachable", tone: "is-error" });
+      if (health?.reachable === true) chips.push({ label: "Endpoint reachable", tone: "is-ready" });
+      if (health?.provider === "ollama" && health?.model_available === false) {
+        chips.push({ label: "Configured model missing", tone: "is-warning" });
+      }
+      if (agent?.error) chips.push({ label: `Fallback: ${agent.error}`, tone: "is-warning" });
+
+      chips.forEach((chip) => {
+        const item = document.createElement("div");
+        item.className = `agent-chip ${chip.tone || ""}`.trim();
+        item.textContent = chip.label;
+        agentMeta.appendChild(item);
+      });
+    }
+
+    function renderAgentLimitations(agent, health) {
+      agentLimitations.innerHTML = "";
+      const limitations = [];
+
+      (agent?.limitations || []).forEach((item) => limitations.push(item));
+      if (health?.provider === "ollama" && Array.isArray(health.available_models) && !health.model_available) {
+        limitations.push(`Available models: ${health.available_models.join(", ") || "none reported"}`);
+      }
+      if (health?.error) limitations.push(`Health error: ${health.error}`);
+
+      limitations.slice(0, 4).forEach((item) => {
+        const badge = document.createElement("div");
+        badge.className = "agent-chip is-warning";
+        badge.textContent = item;
+        agentLimitations.appendChild(badge);
+      });
+    }
+
+    function renderAgent(agent) {
+      const health = state.analysisHealth;
+      if (!agent) {
+        agentSummary.textContent = "Awaiting an AOI. The grounded agent summary will cite the intersecting evidence bundle here.";
+        renderAgentMeta(null, health);
+        agentFindings.innerHTML = "";
+        renderAgentLimitations(null, health);
+        agentEvidence.innerHTML = "";
+        return;
+      }
+
+      agentSummary.textContent = agent.summary || "No summary available.";
+      renderAgentMeta(agent, health);
+      renderAgentLimitations(agent, health);
+
+      agentFindings.innerHTML = "";
+      (agent.findings || []).forEach((finding) => {
+        const item = document.createElement("div");
+        item.className = "bullet-item";
+        item.textContent = finding;
+        agentFindings.appendChild(item);
+      });
+
+      agentEvidence.innerHTML = "";
+      (agent.evidence_bundle || []).forEach((evidence) => {
+        const item = document.createElement("div");
+        item.className = "bullet-item";
+        item.textContent = `${evidence.source_id}: ${evidence.detail}`;
+        agentEvidence.appendChild(item);
+      });
+    }
+
+    function renderRawData(rawSections, rawPayload) {
+      rawData.innerHTML = "";
+      const sections = rawSections?.length ? rawSections : buildLegacyRawSections(rawPayload);
+      if (!sections.length) {
+        rawData.innerHTML = '<div class="empty-state">Draw an AOI to inspect raw intersecting data by source.</div>';
+        return;
+      }
+
+      sections.forEach((section, index) => {
+        const source = document.createElement("details");
+        source.className = "raw-source";
+        source.open = index === 0;
+
+        const summary = document.createElement("summary");
+        summary.className = "raw-source-summary";
+
+        const text = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "raw-source-name";
+        title.textContent = section.title || section.source_id || "Source";
+        const copy = document.createElement("div");
+        copy.className = "raw-source-copy";
+        copy.textContent = section.summary || "No source summary available.";
+        text.appendChild(title);
+        text.appendChild(copy);
+
+        const icon = document.createElement("span");
+        icon.className = "collapse-icon";
+        icon.textContent = "▾";
+
+        summary.appendChild(text);
+        summary.appendChild(icon);
+        source.appendChild(summary);
+
+        const body = document.createElement("div");
+        body.className = "raw-source-body";
+
+        (section.subsections || []).forEach((subsection, subsectionIndex) => {
+          const panel = document.createElement("details");
+          panel.className = "raw-subsection";
+          panel.open = subsectionIndex === 0;
+
+          const panelSummary = document.createElement("summary");
+          panelSummary.className = "raw-subsection-summary";
+          const panelTitle = document.createElement("span");
+          panelTitle.textContent = subsection.title || subsection.id || "Section";
+          const panelIcon = document.createElement("span");
+          panelIcon.className = "collapse-icon";
+          panelIcon.textContent = "▾";
+          panelSummary.appendChild(panelTitle);
+          panelSummary.appendChild(panelIcon);
+          panel.appendChild(panelSummary);
+
+          const panelBody = document.createElement("div");
+          panelBody.className = "raw-subsection-body";
+          const pre = document.createElement("pre");
+          pre.textContent = JSON.stringify(subsection.data ?? {}, null, 2);
+          panelBody.appendChild(pre);
+          panel.appendChild(panelBody);
+
+          body.appendChild(panel);
         });
-      } catch (e) { console.error("Ingest failed:", e); }
 
+        source.appendChild(body);
+        rawData.appendChild(source);
+      });
+    }
+
+    function buildLegacyRawSections(rawPayload) {
+      return Object.entries(rawPayload || {}).map(([sourceId, sourcePayload]) => ({
+        source_id: sourceId,
+        title: sourceId,
+        summary: sourcePayload.summary || "No source summary available.",
+        subsections: [
+          {
+            id: "preview",
+            title: "Preview",
+            data: buildSourcePreview(sourceId, sourcePayload),
+          },
+        ],
+      }));
+    }
+
+    function buildSourcePreview(sourceId, sourcePayload) {
+      if (sourceId === "nls") {
+        return {
+          summary: sourcePayload.summary,
+          feature_count: sourcePayload.feature_count,
+          collections: (sourcePayload.collections || []).slice(0, 5),
+          feature_samples: (sourcePayload.features || []).slice(0, 3).map((feature) => feature.properties || {}),
+        };
+      }
+
+      if (sourceId === "digiroad") {
+        return {
+          summary: sourcePayload.summary,
+          feature_count: sourcePayload.feature_count,
+          feature_samples: (sourcePayload.features || []).slice(0, 4).map((feature) => feature.properties || {}),
+        };
+      }
+
+      if (sourceId === "statistics-finland") {
+        return {
+          summary: sourcePayload.summary,
+          population_total: sourcePayload.population_total,
+          feature_count: sourcePayload.feature_count,
+          cells: (sourcePayload.features || []).slice(0, 4).map((feature) => feature.properties || {}),
+        };
+      }
+
+      if (sourceId === "fmi") {
+        return {
+          summary: sourcePayload.summary,
+          station_count: sourcePayload.station_count,
+          station: sourcePayload.stations?.[0]?.properties || null,
+          observations: sourcePayload.observations || {},
+        };
+      }
+
+      return sourcePayload;
+    }
+
+    function renderEmptyInspector(message) {
+      renderMetrics(null);
+      selectionMeta.textContent = message || "Draw an AOI to inspect intersecting source data.";
+      renderAgent(null);
+      renderRawData(null, null);
+    }
+
+    function renderInspection(payload) {
+      state.latestInspection = payload;
+      selectionLabel.textContent = `${payload.metrics.selection_area_sqkm} km2 AOI`;
+      selectionMeta.textContent = `Bounds: ${payload.selection.bounds.map((value) => value.toFixed(3)).join(", ")}`;
+      renderMetrics(payload.metrics);
+      renderAgent(payload.agent);
+      renderFreshness(payload.freshness);
+      renderRawData(payload.raw_sections, payload.raw_data);
+    }
+
+    async function inspectSelection(geometry) {
+      statusLine.textContent = "Inspecting AOI against current datasets...";
       try {
-        const [placeholderResp, datasetsResp, sourcesResp] = await Promise.all([
-          fetch(`/api/ui-placeholder?area=${encodeURIComponent(state.area)}&timeframe=${encodeURIComponent(state.timeframe)}`),
-          fetch("/api/datasets"),
-          fetch("/api/sources"),
-        ]);
-        state.layers = (await placeholderResp.json()).map_layers || [];
-        state.sources = await sourcesResp.json();
-        const datasets = await datasetsResp.json();
-        state.weatherRecord = [...datasets].reverse().find((r) => r.category === "weather") || null;
+        const response = await fetch("/api/aoi/inspect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ geometry, timeframe: state.timeframe }),
+        });
+        if (!response.ok) {
+          throw new Error(`AOI inspection failed with ${response.status}`);
+        }
 
-        renderOverlays();
-        renderSources();
-        renderWeather();
-        loadMapData();
-      } catch (e) {
-        console.error(e);
-        statusLine.textContent = "Could not load workspace data.";
+        const payload = await response.json();
+        renderInspection(payload);
+        statusLine.textContent = "AOI inspection complete. Adjust overlays on the left or draw a new polygon.";
+      } catch (error) {
+        console.error(error);
+        statusLine.textContent = "AOI inspection failed.";
       }
     }
 
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      state.area = areaInput.value.trim() || "North Karelia";
+    async function bootstrapWorkspace() {
+      if (!state.map) initMap();
+      state.pointWeatherData = null;
+      state.weatherPickerActive = false;
+      if (state.pointMarker) { state.map.removeLayer(state.pointMarker); state.pointMarker = null; }
       state.timeframe = timeframeInput.value.trim() || "72h";
-      document.getElementById("map-area-label").textContent = state.area;
-      if (state.map) state.map.setView(getCenter(state.area), 9);
-      await loadWorkspace();
+
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = "Refreshing...";
+      statusLine.textContent = "Refreshing source datasets for the current workspace...";
+      const weatherPickerToggle = document.querySelector('input[data-action="weather-picker"]');
+      if (weatherPickerToggle) weatherPickerToggle.checked = false;
+      state.map.getContainer().style.cursor = "";
+
+      try {
+        await fetch("/api/ingest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ area: state.bootstrapArea, timeframe: state.timeframe }),
+        });
+      } catch (error) {
+        console.error("Ingest failed:", error);
+      }
+
+      try {
+        const [datasetsResponse, sourcesResponse, analysisHealthResponse] = await Promise.all([
+          fetch("/api/datasets"),
+          fetch("/api/sources"),
+          fetch("/api/analysis/health"),
+        ]);
+        const datasets = await datasetsResponse.json();
+        state.sources = await sourcesResponse.json();
+        state.analysisHealth = analysisHealthResponse.ok ? await analysisHealthResponse.json() : {
+          provider: "unknown",
+          status: "error",
+          error: `Analysis health failed with ${analysisHealthResponse.status}`,
+        };
+        state.weatherRecord = [...datasets].reverse().find((record) => record.category === "weather") || null;
+
+        renderOverlays();
+        renderWeather();
+        renderFreshness(state.sources);
+        await loadMapData();
+
+        if (state.selectionGeometry) {
+          await inspectSelection(state.selectionGeometry);
+        } else {
+          renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
+          statusLine.textContent = "Datasets ready. Shift + drag on the map to inspect an AOI.";
+        }
+      } catch (error) {
+        console.error(error);
+        statusLine.textContent = "Could not load workspace data.";
+      }
+
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "Refresh Data";
+    }
+
+    function clearSelection() {
+      if (state.selectionLayer) state.map.removeLayer(state.selectionLayer);
+      state.selectionLayer = null;
+      state.selectionGeometry = null;
+      state.latestInspection = null;
+      selectionLabel.textContent = "No AOI selected";
+      renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
+      renderFreshness(state.sources);
+      statusLine.textContent = "AOI cleared. Draw a new polygon when ready.";
+    }
+
+    overlayPanelToggle.addEventListener("click", () => {
+      overlayPanel.classList.toggle("is-collapsed");
+      const expanded = !overlayPanel.classList.contains("is-collapsed");
+      overlayPanelToggle.setAttribute("aria-expanded", String(expanded));
     });
 
-    loadWorkspace();
+    inspectorSections.forEach((section) => {
+      const toggle = section.querySelector(".section-toggle");
+      if (!toggle) return;
+      toggle.addEventListener("click", () => {
+        section.classList.toggle("is-collapsed");
+        const expanded = !section.classList.contains("is-collapsed");
+        toggle.setAttribute("aria-expanded", String(expanded));
+      });
+    });
+
+    settingsToggle.addEventListener("click", () => {
+      settingsPanel.classList.toggle("is-collapsed");
+      const expanded = !settingsPanel.classList.contains("is-collapsed");
+      settingsToggle.setAttribute("aria-expanded", String(expanded));
+    });
+
+    wirePanelScrolling(document.querySelector(".inspector"));
+
+    refreshBtn.addEventListener("click", bootstrapWorkspace);
+    clearSelectionBtn.addEventListener("click", clearSelection);
+
+    renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
+    bootstrapWorkspace();
   </script>
 </body>
 </html>

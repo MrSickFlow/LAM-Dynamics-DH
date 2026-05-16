@@ -59,9 +59,32 @@ class NationalLandSurveyAdapter(SourceAdapter):
         return self.AREA_BBOXES.get(normalized, self.AREA_BBOXES["north karelia"])
 
     async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
-        api_key = self._get_api_key()
         bbox = self._resolve_bbox(area)
         bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+
+        if not settings.nls_api_key:
+            collection_data = self._build_demo_collections(bbox)
+            total_features = sum(cd.get("number_matched", 0) for cd in collection_data.values())
+            return DatasetRecord(
+                source_id=self.definition.source_id,
+                category=self.definition.category,
+                area=area,
+                timeframe=timeframe,
+                summary=self._build_summary(area, collection_data, total_features),
+                data={
+                    "provider": "National Land Survey of Finland (demo scaffold)",
+                    "api": "Topographic Database OGC API Features",
+                    "license": "CC 4.0 (NLS open data)",
+                    "query": {
+                        "area": area,
+                        "bbox_wgs84": bbox_str,
+                    },
+                    "collections": collection_data,
+                    "note": "Demo spatial fallback is used because NLS_API_KEY is not configured.",
+                },
+            )
+
+        api_key = self._get_api_key()
 
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             async def fetch_collection(coll_id: str) -> tuple[str, dict[str, Any]]:
@@ -113,6 +136,110 @@ class NationalLandSurveyAdapter(SourceAdapter):
                 "collections": collection_data,
             },
         )
+
+    def _build_demo_collections(self, bbox: tuple[float, float, float, float]) -> dict[str, dict[str, Any]]:
+        min_x, min_y, max_x, max_y = bbox
+        width = max_x - min_x
+        height = max_y - min_y
+
+        def point(x_ratio: float, y_ratio: float) -> list[float]:
+            return [min_x + width * x_ratio, min_y + height * y_ratio]
+
+        def polygon(x0: float, y0: float, x1: float, y1: float) -> list[list[float]]:
+            return [
+                point(x0, y0),
+                point(x1, y0),
+                point(x1, y1),
+                point(x0, y1),
+                point(x0, y0),
+            ]
+
+        return {
+            "tieviiva": {
+                "label": self.COLLECTIONS["tieviiva"],
+                "number_matched": 2,
+                "number_returned": 2,
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [point(0.08, 0.18), point(0.82, 0.78)],
+                        },
+                        "properties": {"nimi": "Primary road corridor"},
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [point(0.14, 0.72), point(0.74, 0.24)],
+                        },
+                        "properties": {"nimi": "Secondary forest road"},
+                    },
+                ],
+            },
+            "rakennus": {
+                "label": self.COLLECTIONS["rakennus"],
+                "number_matched": 2,
+                "number_returned": 2,
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [polygon(0.36, 0.44, 0.42, 0.5)],
+                        },
+                        "properties": {"nimi": "Operations building"},
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [polygon(0.5, 0.56, 0.58, 0.64)],
+                        },
+                        "properties": {"nimi": "Warehouse cluster"},
+                    },
+                ],
+            },
+            "jarvi": {
+                "label": self.COLLECTIONS["jarvi"],
+                "number_matched": 1,
+                "number_returned": 1,
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [polygon(0.18, 0.32, 0.32, 0.46)],
+                        },
+                        "properties": {"nimi": "Lake sample"},
+                    },
+                ],
+            },
+            "korkeuskayra": {
+                "label": self.COLLECTIONS["korkeuskayra"],
+                "number_matched": 2,
+                "number_returned": 2,
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [point(0.12, 0.58), point(0.78, 0.62)],
+                        },
+                        "properties": {"korkeus": 140},
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [point(0.16, 0.64), point(0.82, 0.68)],
+                        },
+                        "properties": {"korkeus": 160},
+                    },
+                ],
+            },
+        }
 
     def _build_summary(
         self, area: str, collection_data: dict[str, dict], total: int

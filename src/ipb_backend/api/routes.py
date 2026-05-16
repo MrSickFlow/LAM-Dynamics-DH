@@ -1,22 +1,36 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 
 from ipb_backend.agents.celltower import CellTowerAgent
 from ipb_backend.agents.placeholders import SummaryAgent
 from ipb_backend.agents.satellite import SatelliteAgent
+from ipb_backend.analysis import (
+    RulesAnalyzer,
+    build_analyzer,
+    build_aoi_metrics,
+    build_evidence_bundle,
+    build_raw_sections,
+    get_analyzer_health,
+)
 from ipb_backend.config import settings
 from ipb_backend.ingestion.sources.fmi import FmiAdapter
 from ipb_backend.models import (
+    AoiInspectionRequest,
+    AoiInspectionResponse,
+    DatasetRecord,
     AgentDefinition,
     IngestionRequest,
+    SourceCategory,
     UiLayer,
     UiPlaceholderResponse,
 )
+from ipb_backend.spatial import clip_geojson_feature, geojson_to_shape, polygon_area_sqkm
 
 router = APIRouter()
 UI_PLACEHOLDER_PATH = Path(__file__).resolve().parents[1] / "ui_placeholder.html"
@@ -39,9 +53,190 @@ def get_services():
     return state
 
 
+def _latest_records_by_source(records):
+    latest = {}
+    for record in records:
+        current = latest.get(record.source_id)
+        if current is None or record.retrieved_at > current.retrieved_at:
+            latest[record.source_id] = record
+    return latest
+
+
+def _collection_summary(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summary = {}
+    for feature in features:
+        props = feature.get("properties", {})
+        coll_id = props.get("_collection", "unknown")
+        label = props.get("_label", coll_id)
+        if coll_id not in summary:
+            summary[coll_id] = {"label": label, "count": 0}
+        summary[coll_id]["count"] += 1
+    return [
+        {"collection": collection, **details}
+        for collection, details in sorted(summary.items(), key=lambda item: item[1]["count"], reverse=True)
+    ]
+
+
+def _clip_nls_record(record, mask):
+    features = []
+    collections = record.data.get("collections", {})
+    for coll_id, coll_data in collections.items():
+        label = coll_data.get("label", coll_id)
+        for sample in coll_data.get("features", []):
+            clipped = clip_geojson_feature(sample, mask)
+            if clipped is None:
+                continue
+            props = clipped.setdefault("properties", {})
+            props["_collection"] = coll_id
+            props["_label"] = label
+            features.append(clipped)
+    return {
+        "summary": record.summary,
+        "feature_count": len(features),
+        "collections": _collection_summary(features),
+        "features": features[:60],
+    }
+
+
+def _clip_feature_dataset(record, mask, feature_limit: int = 30):
+    features = [
+        clipped
+        for feature in record.data.get("features", [])
+        if (clipped := clip_geojson_feature(feature, mask)) is not None
+    ]
+    return {
+        "summary": record.summary,
+        "feature_count": len(features),
+        "features": features[:feature_limit],
+    }
+
+
+def _clip_population_dataset(record, mask, feature_limit: int = 30):
+    features = []
+    population_total = 0
+
+    for feature in record.data.get("features", []):
+        clipped = clip_geojson_feature(feature, mask)
+        if clipped is None:
+            continue
+
+        try:
+            source_geometry = geojson_to_shape(feature.get("geometry", {}))
+            clipped_geometry = geojson_to_shape(clipped.get("geometry", {}))
+        except Exception:
+            continue
+
+        if source_geometry.is_empty or clipped_geometry.is_empty or source_geometry.area <= 0:
+            continue
+
+        overlap_ratio = clipped_geometry.area / source_geometry.area
+        source_population = int(feature.get("properties", {}).get("population", 0) or 0)
+        estimated_population = round(source_population * overlap_ratio)
+        if source_population > 0 and estimated_population == 0:
+            estimated_population = 1
+
+        properties = clipped.setdefault("properties", {})
+        properties["population_source"] = source_population
+        properties["population"] = estimated_population
+        properties["overlap_ratio"] = round(overlap_ratio, 4)
+        population_total += estimated_population
+        features.append(clipped)
+
+    return {
+        "summary": record.summary,
+        "feature_count": len(features),
+        "population_total": population_total,
+        "features": features[:feature_limit],
+    }
+
+
+def _clip_weather_record(record, mask):
+    station = record.data.get("station", {})
+    latitude = station.get("latitude")
+    longitude = station.get("longitude")
+    if latitude is None or longitude is None:
+        return {
+            "summary": record.summary,
+            "station_count": 0,
+            "stations": [],
+            "observations": record.data.get("observations", {}),
+        }
+
+    station_feature = {
+        "type": "Feature",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [longitude, latitude],
+        },
+        "properties": {
+            "name": station.get("name"),
+            "region": station.get("region"),
+        },
+    }
+    clipped = clip_geojson_feature(station_feature, mask)
+    return {
+        "summary": record.summary,
+        "station_count": 1 if clipped else 0,
+        "stations": [clipped] if clipped else [],
+        "observations": record.data.get("observations", {}),
+    }
+
+
+def _is_population_dataset(record: DatasetRecord) -> bool:
+    if record.category != SourceCategory.DEMOGRAPHICS:
+        return False
+
+    for feature in record.data.get("features", []):
+        if "population" in feature.get("properties", {}):
+            return True
+
+    return False
+
+
+def _clip_record_for_aoi(record: DatasetRecord, mask, source_name: str | None = None) -> dict[str, Any]:
+    if record.data.get("collections"):
+        payload = _clip_nls_record(record, mask)
+    elif record.data.get("station") or record.data.get("observations"):
+        payload = _clip_weather_record(record, mask)
+    elif record.data.get("features") and _is_population_dataset(record):
+        payload = _clip_population_dataset(record, mask)
+    elif record.data.get("features"):
+        payload = _clip_feature_dataset(record, mask)
+    else:
+        payload = {"summary": record.summary}
+
+    payload["source_id"] = record.source_id
+    payload["category"] = record.category.value
+    if source_name:
+        payload["title"] = source_name
+    return payload
+
+
+def _build_freshness(services, latest_records):
+    freshness = []
+    for source in services["registry"].list_sources():
+        record = latest_records.get(source.source_id)
+        freshness.append(
+            {
+                "source_id": source.source_id,
+                "name": source.name,
+                "status": source.status,
+                "last_successful_refresh": source.last_successful_refresh,
+                "last_error": source.last_error,
+                "retrieved_at": record.retrieved_at if record else None,
+            }
+        )
+    return freshness
+
+
 @router.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@router.get("/analysis/health")
+async def analysis_health():
+    return await get_analyzer_health()
 
 
 @router.get("/sources")
@@ -157,6 +352,72 @@ async def weather_point(lat: float = Query(...), lon: float = Query(...), timefr
         return {"error": "FMI adapter not available"}
     result = await adapter.fetch_point_weather(lat, lon, timeframe)
     return result
+
+
+@router.post("/aoi/inspect", response_model=AoiInspectionResponse)
+async def inspect_aoi(request: AoiInspectionRequest, services=Depends(get_services)):
+    try:
+        mask = geojson_to_shape(request.geometry)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid AOI geometry: {exc}") from exc
+
+    if mask.is_empty:
+        raise HTTPException(status_code=400, detail="AOI geometry is empty")
+    if mask.geom_type == "MultiPolygon":
+        mask = max(mask.geoms, key=lambda geom: geom.area)
+    elif mask.geom_type != "Polygon":
+        raise HTTPException(status_code=400, detail="AOI geometry must be a Polygon or MultiPolygon")
+
+    latest_records = _latest_records_by_source(services["ingestion_service"].records)
+    raw_data: dict[str, Any] = {}
+    source_names = {
+        definition.source_id: definition.name
+        for definition in services["registry"].list_sources()
+    }
+
+    for record in latest_records.values():
+        raw_data[record.source_id] = _clip_record_for_aoi(
+            record,
+            mask,
+            source_name=source_names.get(record.source_id),
+        )
+
+    selection = {
+        "geometry": request.geometry,
+        "bounds": list(mask.bounds),
+    }
+    freshness = _build_freshness(services, latest_records)
+    metrics = build_aoi_metrics(polygon_area_sqkm(mask), raw_data)
+    evidence_bundle = build_evidence_bundle(metrics, raw_data)
+    analyzer = build_analyzer()
+    try:
+        agent = await analyzer.analyze(
+            selection=selection,
+            metrics=metrics,
+            raw_data=raw_data,
+            freshness=freshness,
+            evidence_bundle=evidence_bundle,
+        )
+    except Exception as exc:
+        fallback = RulesAnalyzer()
+        agent = await fallback.analyze(
+            selection=selection,
+            metrics=metrics,
+            raw_data=raw_data,
+            freshness=freshness,
+            evidence_bundle=evidence_bundle,
+        )
+        agent["status"] = "fallback"
+        agent["error"] = str(exc)
+
+    return AoiInspectionResponse(
+        selection=selection,
+        metrics=metrics,
+        raw_data=raw_data,
+        raw_sections=build_raw_sections(raw_data),
+        freshness=freshness,
+        agent=agent,
+    )
 
 
 @router.get("/ui-demo", response_class=HTMLResponse)
