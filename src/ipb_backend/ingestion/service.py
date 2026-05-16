@@ -26,7 +26,11 @@ class IngestionService:
             raise ValueError(f"Unknown source ids: {missing_list}")
 
         tasks = [self._fetch_one(source_id, request.area, request.timeframe, request.load_target) for source_id in source_ids]
-        records = [record for record in await asyncio.gather(*tasks) if record is not None]
+        try:
+            results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=50.0)
+        except asyncio.TimeoutError:
+            results = []
+        records = [record for record in results if record is not None]
         self._records.extend(records)
         return IngestionResult(requested_sources=source_ids, produced_records=records)
 
