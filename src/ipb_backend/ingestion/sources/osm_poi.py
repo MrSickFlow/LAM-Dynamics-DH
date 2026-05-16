@@ -73,7 +73,9 @@ BATCHES: list[dict[str, Any]] = [
 ]
 
 
-def _build_query(batch: dict[str, Any], b: str, limit: int = 3000) -> str:
+def _build_query(batch: dict[str, Any], b: str) -> str:
+    # Use a smaller limit for geometry batches (forest/power) to cap memory usage.
+    limit = 300 if batch.get("geom") else 3000
     union = "".join(q.format(b=b) for q in batch["queries"].values())
     out_mode = "geom" if batch.get("geom") else "center"
     return f"[out:json][timeout:55];({union});out {out_mode} {limit};"
@@ -191,6 +193,21 @@ class OsmPoiAdapter(SourceAdapter):
                 last_exc = exc
         raise ValueError(f"All Overpass endpoints failed: {last_exc}") from last_exc
 
+    async def _fetch_batch(
+        self,
+        client: httpx.AsyncClient,
+        index: int,
+        batch: dict[str, Any],
+        b: str,
+    ) -> tuple[int, list[dict[str, Any]], str | None]:
+        use_geom = batch.get("geom", False)
+        query = _build_query(batch, b)
+        try:
+            elements = await self._query_batch(client, query)
+            return index, elements, None
+        except Exception as exc:
+            return index, [], f"batch{index + 1}: {exc}"
+
     async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
         bbox = resolve_load_target_bbox(area, load_target)
         area_label = resolve_load_target_label(area, load_target)
@@ -200,28 +217,24 @@ class OsmPoiAdapter(SourceAdapter):
         batch_errors: list[str] = []
 
         async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
-            for i, batch in enumerate(BATCHES):
-                use_geom = batch.get("geom", False)
-                query = _build_query(batch, b)
-                try:
-                    elements = await self._query_batch(client, query)
-                except Exception as exc:
-                    batch_errors.append(f"batch{i+1}: {exc}")
+            results = await asyncio.gather(
+                *[self._fetch_batch(client, i, batch, b) for i, batch in enumerate(BATCHES)]
+            )
+
+        for index, elements, error in results:
+            if error:
+                batch_errors.append(error)
+                continue
+            use_geom = BATCHES[index].get("geom", False)
+            for el in elements:
+                tags = el.get("tags", {})
+                category = _classify(tags)
+                if category == "other":
                     continue
-
-                for el in elements:
-                    tags = el.get("tags", {})
-                    category = _classify(tags)
-                    if category == "other":
-                        continue
-                    poi = _feature_to_poi(el, category, use_geom=use_geom)
-                    # Keep the feature if it has either a geometry or a lat/lon centroid
-                    if poi["geometry"] is None and (poi["lat"] is None or poi["lon"] is None):
-                        continue
-                    categories.setdefault(category, []).append(poi)
-
-                if i < len(BATCHES) - 1:
-                    await asyncio.sleep(1)
+                poi = _feature_to_poi(el, category, use_geom=use_geom)
+                if poi["geometry"] is None and (poi["lat"] is None or poi["lon"] is None):
+                    continue
+                categories.setdefault(category, []).append(poi)
 
         if not categories and batch_errors:
             raise ValueError(f"OSM POI fetch failed: {'; '.join(batch_errors)}")
