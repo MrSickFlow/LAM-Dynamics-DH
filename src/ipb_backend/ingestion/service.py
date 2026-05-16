@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timezone
+
+from ipb_backend.ingestion.base import SourceAdapter
+from ipb_backend.ingestion.registry import SourceRegistry
+from ipb_backend.models import IngestionRequest, IngestionResult, SourceStatus
+
+
+class IngestionService:
+    def __init__(self, registry: SourceRegistry, adapters: dict[str, SourceAdapter]) -> None:
+        self._registry = registry
+        self._adapters = adapters
+        self._records = []
+
+    @property
+    def records(self):
+        return list(self._records)
+
+    async def ingest(self, request: IngestionRequest) -> IngestionResult:
+        source_ids = request.source_ids or self._registry.enabled_source_ids()
+        tasks = [self._fetch_one(source_id, request.area, request.timeframe) for source_id in source_ids]
+        records = [record for record in await asyncio.gather(*tasks) if record is not None]
+        self._records.extend(records)
+        return IngestionResult(requested_sources=source_ids, produced_records=records)
+
+    async def _fetch_one(self, source_id: str, area: str, timeframe: str):
+        definition = self._registry.get(source_id)
+        if not definition.enabled:
+            return None
+
+        adapter = self._adapters[source_id]
+        try:
+            record = await adapter.fetch(area, timeframe)
+            updated_definition = definition.model_copy(
+                update={
+                    "status": SourceStatus.READY,
+                    "last_successful_refresh": datetime.now(timezone.utc),
+                    "last_error": None,
+                }
+            )
+            self._registry.update(updated_definition)
+            return record
+        except Exception as exc:
+            updated_definition = definition.model_copy(
+                update={
+                    "status": SourceStatus.ERROR,
+                    "last_error": str(exc),
+                }
+            )
+            self._registry.update(updated_definition)
+            return None
