@@ -179,7 +179,7 @@ class StatisticsFinlandAdapter(SourceAdapter):
 
         values = data.get("value", [])
         n_classes = len(URBAN_RURAL_CODES)
-        per_muni: dict[str, dict[str, int]] = {}
+        per_muni: dict[str, dict[str, Any]] = {}
         totals: dict[str, int] = {}
 
         for m_idx, muni_code in enumerate(municipalities):
@@ -208,7 +208,7 @@ class StatisticsFinlandAdapter(SourceAdapter):
         total = 0
         male = 0
         female = 0
-        per_muni: dict[str, dict[str, int]] = {}
+        per_muni: dict[str, dict[str, Any]] = {}
 
         for i in range(n_muni):
             base = i * stride
