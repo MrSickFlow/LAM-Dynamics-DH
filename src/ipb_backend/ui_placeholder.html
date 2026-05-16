@@ -266,42 +266,47 @@
         const geojson = await resp.json();
         state.mapDataLayer.clearLayers();
         state.mapDataLayer.addData(geojson);
-        renderOverlays();
         statusLine.textContent = `Synced. ${geojson.features.length} features on map.`;
       } catch (e) { console.error("Map data load failed:", e); }
     }
 
+    const NLS_COLLECTIONS = [
+      { id: "tieviiva", label: "Road network", color: "#c46c32" },
+      { id: "rakennus", label: "Buildings", color: "#195d85" },
+      { id: "jarvi", label: "Lakes", color: "#215347" },
+      { id: "meri", label: "Sea areas", color: "#215347" },
+      { id: "virtavesialue", label: "Rivers and streams", color: "#215347" },
+      { id: "korkeuskayra", label: "Elevation contours", color: "#5a6a61" },
+      { id: "suo", label: "Bogs and marshes", color: "#5a6a61" },
+      { id: "kallioalue", label: "Rocky areas", color: "#5a6a61" },
+      { id: "metsamaankasvillisuus", label: "Forest vegetation", color: "#2a8a5c" },
+      { id: "maatalousmaa", label: "Agricultural land", color: "#c4a832" },
+      { id: "taajaanrakennettualue", label: "Densely built areas", color: "#195d85" },
+      { id: "rautatie", label: "Railways", color: "#c46c32" },
+      { id: "sahkolinja", label: "Power lines", color: "#c46c32" },
+      { id: "paikannimi", label: "Place names", color: "#c46c32" },
+      { id: "kunta", label: "Municipalities", color: "#195d85" },
+      { id: "kunnanhallintoraja", label: "Municipal boundaries", color: "#195d85" },
+      { id: "luonnonsuojelualue", label: "Protected areas", color: "#2a8a5c" },
+      { id: "lentokenttaalue", label: "Airport areas", color: "#888" },
+      { id: "satamaalue", label: "Harbor areas", color: "#215347" },
+      { id: "rautatieliikennepaikka", label: "Railway stations", color: "#c46c32" },
+      { id: "osoitepiste", label: "Address points", color: "#888" },
+    ];
+
     function renderOverlays() {
       overlayControls.innerHTML = "";
-      const collColors = {
-        tieviiva: "#c46c32", rakennus: "#195d85", jarvi: "#215347", meri: "#215347",
-        virtavesialue: "#215347", korkeuskayra: "#5a6a61", suo: "#5a6a61",
-        kallioalue: "#5a6a61", metsamaankasvillisuus: "#2a8a5c", maatalousmaa: "#c4a832",
-        taajaanrakennettualue: "#195d85", rautatie: "#c46c32", sahkolinja: "#c46c32",
-        paikannimi: "#c46c32", kunta: "#195d85", kunnanhallintoraja: "#195d85",
-        luonnonsuojelualue: "#2a8a5c", lentokenttaalue: "#888", satamaalue: "#215347",
-        rautatieliikennepaikka: "#c46c32", osoitepiste: "#888",
-      };
-      const used = new Set();
-      if (state.mapDataLayer) {
-        state.mapDataLayer.eachLayer((layer) => {
-          const coll = layer.feature?.properties?._collection;
-          const label = layer.feature?.properties?._label || coll;
-          if (coll && !used.has(coll)) {
-            used.add(coll);
-            const el = document.createElement("label");
-            el.className = "overlay-item";
-            el.dataset.collection = coll;
-            el.innerHTML = `
-              <input type="checkbox" checked data-collection="${coll}" />
-              <span class="overlay-swatch" style="background:${collColors[coll] || '#888'}"></span>
-              <span>${label}</span>
-            `;
-            el.querySelector("input").addEventListener("change", toggleOverlay);
-            overlayControls.appendChild(el);
-          }
-        });
-      }
+      NLS_COLLECTIONS.forEach((coll) => {
+        const el = document.createElement("label");
+        el.className = "overlay-item";
+        el.innerHTML = `
+          <input type="checkbox" checked data-collection="${coll.id}" />
+          <span class="overlay-swatch" style="background:${coll.color}"></span>
+          <span>${coll.label}</span>
+        `;
+        el.querySelector("input").addEventListener("change", toggleOverlay);
+        overlayControls.appendChild(el);
+      });
     }
 
     function toggleOverlay(e) {
@@ -387,6 +392,7 @@
         const datasets = await datasetsResp.json();
         state.weatherRecord = [...datasets].reverse().find((r) => r.category === "weather") || null;
 
+        renderOverlays();
         renderSources();
         renderWeather();
         loadMapData();
