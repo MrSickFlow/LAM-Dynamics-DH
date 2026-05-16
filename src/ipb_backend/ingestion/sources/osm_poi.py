@@ -33,10 +33,8 @@ BATCHES: list[dict[str, str]] = [
         "government":       ('node["amenity"~"townhall|courthouse|prison|embassy|community_centre"]({b});'
                              'way["amenity"~"townhall|courthouse|prison|embassy|community_centre"]({b});'),
     },
-    # Batch 2 — transport only (bus_stop alone exceeds 2500 in large regions)
+    # Batch 2 — water sources
     {
-        "transport":        ('node["amenity"~"bus_station|ferry_terminal"]({b});'
-                             'node["highway"="bus_stop"]({b});'),
         "water_sources":    ('node["amenity"="drinking_water"]({b});'
                              'node["man_made"~"water_tower|water_well|water_works"]({b});'
                              'node["natural"="spring"]({b});'
@@ -59,10 +57,6 @@ BATCHES: list[dict[str, str]] = [
         "fuel_supply":      ('node["amenity"="fuel"]({b});'
                              'way["amenity"="fuel"]({b});'
                              'node["shop"="gas"]({b});'),
-        "forest":           ('way["natural"="wood"]({b});'
-                             'way["landuse"="forest"]({b});'
-                             'relation["natural"="wood"]({b});'
-                             'relation["landuse"="forest"]({b});'),
         "industry":         ('node["landuse"~"industrial|commercial|retail"]({b});'
                              'way["landuse"~"industrial|commercial|retail"]({b});'
                              'node["building"~"industrial|warehouse|factory"]({b});'
@@ -78,7 +72,6 @@ def _build_query(batch: dict[str, str], b: str, limit: int = 3000) -> str:
 
 def _classify(tags: dict[str, str]) -> str:
     amenity = tags.get("amenity", "")
-    highway = tags.get("highway", "")
     natural = tags.get("natural", "")
     landuse = tags.get("landuse", "")
     man_made = tags.get("man_made", "")
@@ -98,8 +91,6 @@ def _classify(tags: dict[str, str]) -> str:
         return "emergency_services"
     if amenity in {"townhall", "courthouse", "prison", "embassy", "community_centre"}:
         return "government"
-    if amenity in {"bus_station", "ferry_terminal"} or highway == "bus_stop":
-        return "transport"
     if amenity == "drinking_water" or man_made in {"water_tower", "water_well", "water_works"} or natural == "spring":
         return "water_sources"
     if amenity == "fuel" or shop == "gas":
@@ -110,15 +101,12 @@ def _classify(tags: dict[str, str]) -> str:
         return "military"
     if power in {"tower", "pole", "substation", "plant", "generator", "line", "minor_line", "cable"}:
         return "power_infrastructure"
-    if natural == "wood" or landuse == "forest":
-        return "forest"
     if landuse in {"industrial", "commercial", "retail"} or building in {"industrial", "warehouse", "factory"}:
         return "industry"
     return "other"
 
 
 ALLOWED_TAGS: dict[str, set[str]] = {
-    "forest": {"leaf_type", "leaf_cycle", "natural", "landuse", "name", "wood"},
     "military": {"military", "name", "landuse", "access", "description"},
     "airfields": {"aeroway", "name", "icao", "iata", "operator", "surface", "length", "width"},
     "industry": {"landuse", "building", "name", "operator", "industrial"},

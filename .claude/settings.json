@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git pull*)",
+            "command": "/Users/Omistaja/defence3/LAM-Dynamics-DH/.claude/restart_backend.sh",
+            "async": true,
+            "statusMessage": "Restarting backend after git pull..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | grep -q '\\.py$' && /Users/Omistaja/defence3/LAM-Dynamics-DH/.claude/restart_backend.sh || true",
+            "async": true,
+            "statusMessage": "Restarting backend after Python change..."
+          }
+        ]
+      }
+    ]
+  }
+}

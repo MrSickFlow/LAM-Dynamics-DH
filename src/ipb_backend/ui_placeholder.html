@@ -1415,9 +1415,7 @@
       { id: "poi-religion", label: "Religion", color: "#c46c32" },
       { id: "poi-emergency_services", label: "Emergency Services", color: "#c46c32" },
       { id: "poi-government", label: "Government", color: "#195d85" },
-      { id: "poi-transport", label: "Transport", color: "#c46c32" },
       { id: "poi-industry", label: "Industry", color: "#5a6a61" },
-      { id: "poi-forest", label: "Forest", color: "#2a8a5c" },
       { id: "poi-military", label: "Military Zones", color: "#8b1a1a" },
       { id: "poi-airfields", label: "Airfields & Helipads", color: "#888" },
       { id: "poi-fuel_supply", label: "Fuel & Supply Points", color: "#c4a832" },
@@ -1462,7 +1460,7 @@
       },
       {
         name: "Civilian & Logistics",
-        ids: ["poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-transport", "poi-industry", "poi-forest", "poi-religion"],
+        ids: ["poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-religion"],
       },
       {
         name: "Satellites",
@@ -1477,7 +1475,7 @@
 
     const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites", "digitraffic-road-surface"];
     const CUSTOM_LOAD_SOURCE_IDS = ["nls", "statistics-finland", "digiroad", "osm-poi"];
-    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-transport", "poi-industry", "poi-forest", "poi-religion"]);
+    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-religion"]);
 
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
@@ -1507,9 +1505,8 @@
       "poi-religion": { point: true, color: "#c46c32" },
       "poi-emergency_services": { point: true, color: "#c46c32" },
       "poi-government": { point: true, color: "#195d85" },
-      "poi-transport": { point: true, color: "#c46c32" },
+
       "poi-industry": { point: true, color: "#5a6a61" },
-      "poi-forest": { point: true, color: "#2a8a5c" },
       "poi-military": { point: true, color: "#8b1a1a" },
       "poi-airfields": { point: true, color: "#555" },
       "poi-fuel_supply": { point: true, color: "#c4a832" },
