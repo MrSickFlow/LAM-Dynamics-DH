@@ -1197,6 +1197,9 @@
         }
 
         setNlsOverlayAvailability(true);
+        if (geojson.message) {
+          statusLine.textContent = geojson.message;
+        }
 
         const grouped = {};
         geojson.features.forEach((feature) => {

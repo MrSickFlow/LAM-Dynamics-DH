@@ -442,14 +442,7 @@ async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_
         return {"type": "FeatureCollection", "features": [], "available": False, "reason": "missing"}
 
     note = str(nls_record.data.get("note", "") or "")
-    if "Demo spatial fallback" in note:
-        return {
-            "type": "FeatureCollection",
-            "features": [],
-            "available": False,
-            "reason": "demo-fallback",
-            "message": "NLS vector overlays are disabled because NLS_API_KEY is not configured.",
-        }
+    is_demo_fallback = "Demo spatial fallback" in note
 
     collections = nls_record.data.get("collections", {})
     features = []
@@ -465,7 +458,11 @@ async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_
                     "geometry": sample["geometry"],
                     "properties": props,
                 })
-    return {"type": "FeatureCollection", "features": features, "available": True}
+    payload = {"type": "FeatureCollection", "features": features, "available": True}
+    if is_demo_fallback:
+        payload["reason"] = "demo-fallback"
+        payload["message"] = "Showing demo NLS vector overlays because NLS_API_KEY is not configured."
+    return payload
 
 
 @router.get("/weather/point")

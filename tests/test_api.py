@@ -109,7 +109,7 @@ def test_health_endpoint():
     assert response.json() == {"status": "ok"}
 
 
-def test_map_data_nls_hides_demo_fallback_vectors():
+def test_map_data_nls_returns_demo_fallback_vectors():
     state["ingestion_service"]._records.clear()
     state["ingestion_service"]._records.append(
         DatasetRecord(
@@ -143,9 +143,10 @@ def test_map_data_nls_hides_demo_fallback_vectors():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["available"] is False
+    assert payload["available"] is True
     assert payload["reason"] == "demo-fallback"
-    assert payload["features"] == []
+    assert len(payload["features"]) == 1
+    assert payload["features"][0]["properties"]["_collection"] == "rakennus"
 
 
 def test_analysis_health_endpoint_reports_ollama_model(monkeypatch):
