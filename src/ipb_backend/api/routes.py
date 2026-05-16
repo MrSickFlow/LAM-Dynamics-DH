@@ -14,7 +14,9 @@ from ipb_backend.agents.forest_concealment import ForestConcealmentAgent
 from ipb_backend.agents.placeholders import SummaryAgent
 from ipb_backend.agents.power_grid import PowerGridAgent
 from ipb_backend.agents.satellite import SatelliteAgent
+from ipb_backend.agents.consistency import ConsistencyEngineAgent
 from ipb_backend.agents.weather_impact import WeatherImpactAgent
+from ipb_backend.models import ConsistencyReport
 from ipb_backend.analysis import (
     RulesAnalyzer,
     build_analyzer,
@@ -349,8 +351,47 @@ async def analysis_health():
 
 
 @router.get("/sources")
-async def list_sources(services=Depends(get_services)):
-    return services["registry"].list_sources()
+async def list_sources(
+    services=Depends(get_services),
+    include_trust: bool = Query(default=False),
+):
+    sources = services["registry"].list_sources()
+    if not include_trust:
+        return sources
+    report: ConsistencyReport | None = services.get("last_consistency_report")
+    trust_by_id = {layer.source_id: layer for layer in report.layer_trust} if report else {}
+    enriched = []
+    for source in sources:
+        payload = source.model_dump()
+        trust = trust_by_id.get(source.source_id)
+        payload["trust"] = trust.model_dump() if trust else None
+        enriched.append(payload)
+    return enriched
+
+
+@router.post("/consistency/run", response_model=ConsistencyReport)
+async def run_consistency(
+    area: str,
+    timeframe: str,
+    services=Depends(get_services),
+):
+    records = _latest_records_by_source(services["ingestion_service"].records)
+    report = await services["consistency_engine"].evaluate(
+        area=area,
+        timeframe=timeframe,
+        records=records,
+        sources=services["registry"].list_sources(),
+    )
+    services["last_consistency_report"] = report
+    return report
+
+
+@router.get("/consistency/report", response_model=ConsistencyReport)
+async def get_consistency_report(services=Depends(get_services)):
+    report = services.get("last_consistency_report")
+    if report is None:
+        raise HTTPException(status_code=404, detail="No consistency report. POST /api/consistency/run first.")
+    return report
 
 
 @router.post("/ingest")
@@ -552,6 +593,117 @@ async def map_data_osm_poi(area: str = Query("North Karelia"), services=Depends(
     return {"type": "FeatureCollection", "features": features, "available": True}
 
 
+@router.get("/map-data/maritime")
+async def map_data_maritime(area: str = Query("Archipelago Sea"), services=Depends(get_services)):
+    from ipb_backend.consistency.fixtures import ARCHIPELAGO_MARITIME_FIXTURE
+
+    records = services["ingestion_service"].records
+    record = next((r for r in records if r.source_id == "maritime-demo"), None)
+    if record is not None:
+        ais_vessels = record.data.get("ais_vessels", [])
+        sar_returns = record.data.get("sar_returns", [])
+    elif "archipelago" in area.lower():
+        ais_vessels = ARCHIPELAGO_MARITIME_FIXTURE["ais_vessels"]
+        sar_returns = ARCHIPELAGO_MARITIME_FIXTURE["sar_returns"]
+    else:
+        return {"type": "FeatureCollection", "features": [], "available": False}
+
+    features: list[dict[str, Any]] = []
+    for vessel in ais_vessels:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [vessel["lon"], vessel["lat"]]},
+                "properties": {
+                    "_collection": "ais",
+                    "_label": "AIS track",
+                    "name": vessel.get("name", ""),
+                    "mmsi": vessel.get("mmsi", ""),
+                },
+            }
+        )
+    for index, sar in enumerate(sar_returns):
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [sar["lon"], sar["lat"]]},
+                "properties": {
+                    "_collection": "sar",
+                    "_label": "SAR return",
+                    "return_id": index + 1,
+                    "confidence": sar.get("confidence"),
+                },
+            }
+        )
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "available": True,
+        "message": f"{len(ais_vessels)} AIS tracks, {len(sar_returns)} SAR returns",
+    }
+
+
+@router.get("/map-data/consistency")
+async def map_data_consistency(
+    area: str = Query("North Karelia"),
+    timeframe: str = Query("72h"),
+    services=Depends(get_services),
+):
+    report: ConsistencyReport | None = services.get("last_consistency_report")
+    if report is None or report.area != area or report.timeframe != timeframe:
+        records = _latest_records_by_source(services["ingestion_service"].records)
+        report = await services["consistency_engine"].evaluate(
+            area=area,
+            timeframe=timeframe,
+            records=records,
+            sources=services["registry"].list_sources(),
+        )
+        services["last_consistency_report"] = report
+
+    severity_weight = {"low": 0.35, "medium": 0.6, "high": 0.85, "critical": 1.0}
+    features: list[dict[str, Any]] = []
+    for anomaly in report.anomalies:
+        location = anomaly.location
+        if not location:
+            continue
+        geometry = location
+        if location.get("type") != "Point" and location.get("lat") is not None:
+            geometry = {
+                "type": "Point",
+                "coordinates": [location["lon"], location["lat"]],
+            }
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": geometry,
+                "properties": {
+                    "_collection": "consistency-anomaly",
+                    "anomaly_id": anomaly.anomaly_id,
+                    "rule_id": anomaly.rule_id,
+                    "title": anomaly.title,
+                    "description": anomaly.description,
+                    "severity": anomaly.severity.value,
+                    "intensity": severity_weight.get(anomaly.severity.value, 0.5),
+                    "vulnerable_sources": anomaly.vulnerable_sources,
+                    "immune_sources": anomaly.immune_sources,
+                    "synthetic_demo": anomaly.synthetic_demo,
+                },
+            }
+        )
+
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "clusters": [cluster.model_dump() for cluster in report.clusters],
+        "layer_trust": [layer.model_dump() for layer in report.layer_trust],
+        "summary": report.summary,
+        "ew_pattern_detected": report.ew_pattern_detected,
+        "disclaimer": report.disclaimer,
+        "anomaly_count": len(report.anomalies),
+        "available": True,
+    }
+
+
 @router.get("/map-data/satellites")
 async def map_data_satellites(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
@@ -662,6 +814,17 @@ async def inspect_aoi(request: AoiInspectionRequest, services=Depends(get_servic
     )
 
 
+UI_CONSISTENCY_PATH = Path(__file__).resolve().parents[1] / "ui_consistency.js"
+
+
+@router.get("/ui-consistency.js")
+async def ui_consistency_js():
+    return Response(
+        content=UI_CONSISTENCY_PATH.read_text(encoding="utf-8"),
+        media_type="application/javascript",
+    )
+
+
 @router.get("/ui-demo", response_class=HTMLResponse)
 async def ui_demo():
     return UI_PLACEHOLDER_PATH.read_text(encoding="utf-8")
@@ -718,6 +881,12 @@ async def list_agents():
             purpose="Analyzes power line infrastructure density and identifies chokepoints for logistics assessment.",
             status="active",
         ),
+        AgentDefinition(
+            agent_id="consistency-engine-agent",
+            name="Data Consistency Engine",
+            purpose="Cross-validates EW-vulnerable feeds against immune baselines; flags anomalies and trust scores.",
+            status="active",
+        ),
     ]
 
 
@@ -760,4 +929,16 @@ async def run_agent(agent_id: str, area: str, timeframe: str, services=Depends(g
         if not adapter:
             return {"error": "NLS adapter not available"}
         return await PowerGridAgent(adapter).run(area=area, timeframe=timeframe)
+    if agent_id == "consistency-engine-agent":
+        engine = services.get("consistency_engine")
+        if not engine:
+            return {"error": "Consistency engine not available"}
+        agent = ConsistencyEngineAgent(
+            engine=engine,
+            ingestion_service=services["ingestion_service"],
+            registry=services["registry"],
+        )
+        result = await agent.run(area=area, timeframe=timeframe)
+        services["last_consistency_report"] = ConsistencyReport.model_validate(result.data)
+        return result
     return {"error": f"Unknown agent: {agent_id}"}

@@ -33,6 +33,19 @@ class DatasetRecord(BaseModel):
     data: dict[str, Any]
 
 
+class EwClassification(str, Enum):
+    IMMUNE = "immune"
+    VULNERABLE = "vulnerable"
+    MIXED = "mixed"
+
+
+class AnomalySeverity(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
 class SourceDefinition(BaseModel):
     source_id: str
     name: str
@@ -43,6 +56,65 @@ class SourceDefinition(BaseModel):
     status: SourceStatus = SourceStatus.IDLE
     last_successful_refresh: Optional[datetime] = None
     last_error: Optional[str] = None
+    ew_classification: EwClassification = EwClassification.MIXED
+    gnss_dependent: bool = False
+    ew_rationale: Optional[str] = None
+
+
+class LikelyExplanation(BaseModel):
+    cause: str
+    likelihood: float = Field(ge=0.0, le=1.0)
+    note: str
+
+
+class ConsistencyAnomaly(BaseModel):
+    anomaly_id: str
+    rule_id: str
+    title: str
+    description: str
+    severity: AnomalySeverity
+    location: Optional[dict[str, Any]] = None
+    vulnerable_sources: list[str] = Field(default_factory=list)
+    immune_sources: list[str] = Field(default_factory=list)
+    measured: dict[str, Any] = Field(default_factory=dict)
+    expected: dict[str, Any] = Field(default_factory=dict)
+    likely_explanations: list[LikelyExplanation] = Field(default_factory=list)
+    synthetic_demo: bool = False
+
+
+class LayerTrustScore(BaseModel):
+    source_id: str
+    ew_classification: EwClassification
+    gnss_dependent: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    status: SourceStatus
+    staleness_seconds: Optional[int] = None
+    factors: list[str] = Field(default_factory=list)
+
+
+class SpatialCluster(BaseModel):
+    cluster_id: str
+    centroid: dict[str, float]
+    radius_km: float
+    anomaly_count: int
+    anomaly_ids: list[str]
+    affected_sources: list[str]
+    pattern_assessment: str
+
+
+class ConsistencyReport(BaseModel):
+    area: str
+    timeframe: str
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    layer_trust: list[LayerTrustScore]
+    anomalies: list[ConsistencyAnomaly]
+    clusters: list[SpatialCluster]
+    summary: str
+    ew_pattern_detected: bool
+    disclaimer: str = (
+        "Anomalies indicate cross-source disagreement, not confirmed EW. "
+        "Analysts assess whether degradation reflects jamming, spoofing, staleness, or equipment failure."
+    )
 
 
 class IngestionRequest(BaseModel):

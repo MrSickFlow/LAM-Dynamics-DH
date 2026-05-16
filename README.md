@@ -28,6 +28,7 @@ Given a geographic area and timeframe, the tool retrieves, processes, and surfac
 | **WeatherImpact** | Maps weather to operational effects (drone restrictions, surveillance windows, mobility) | `POST /api/agents/weather-impact-agent/run` |
 | **PowerGrid** | Power line density and chokepoint assessment from NLS data | `POST /api/agents/power-grid-agent/run` |
 | **Summary (WIP)** | Multi-source fusion placeholder | — |
+| **Data Consistency Engine** | Cross-validates EW-vulnerable vs immune sources; trust scores, anomalies, spatial clustering | `POST /api/consistency/run` |
 
 ## API endpoints
 
@@ -39,6 +40,9 @@ Given a geographic area and timeframe, the tool retrieves, processes, and surfac
 | GET | `/api/datasets` | List ingested records |
 | GET | `/api/agents` | List analysis agents |
 | POST | `/api/agents/{id}/run` | Run an agent |
+| POST | `/api/consistency/run` | Run Data Consistency Engine (trust + anomalies) |
+| GET | `/api/consistency/report` | Last consistency report |
+| GET | `/api/sources?include_trust=true` | Sources with trust scores after consistency run |
 | POST | `/api/aoi/inspect` | Spatial clip + fusion analysis |
 | GET | `/api/weather/point` | Point weather query |
 | GET | `/api/ui-demo` | Interactive map + dashboard UI |

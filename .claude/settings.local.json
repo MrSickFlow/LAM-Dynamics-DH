@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd \"c:\\\\projects\\\\defhack\\\\LAM-Dynamics-DH\"; $env:PYTHONPATH=\"src\"; .venv\\\\Scripts\\\\python -c \"from ipb_backend.consistency.engine import DataConsistencyEngine; from ipb_backend.consistency.rules import DEFAULT_RULES; from ipb_backend.consistency.clustering import cluster_anomalies; print\\('All consistency imports OK, rules:', len\\(DEFAULT_RULES\\)\\)\")"
+    ]
+  }
+}

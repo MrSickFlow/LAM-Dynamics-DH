@@ -16,7 +16,10 @@ from ipb_backend.ingestion.sources.opencellid import OpenCellIdAdapter
 from ipb_backend.ingestion.sources.osm_poi import OsmPoiAdapter
 from ipb_backend.ingestion.sources.satellites import SatelliteTleAdapter
 from ipb_backend.ingestion.sources.statistics_finland import StatisticsFinlandAdapter
-from ipb_backend.models import SourceCategory, SourceDefinition, SourceStatus
+from ipb_backend.consistency.classification import get_source_profile
+from ipb_backend.consistency.engine import DataConsistencyEngine
+from ipb_backend.models import EwClassification, SourceCategory, SourceDefinition, SourceStatus
+from ipb_backend.ingestion.sources.maritime_demo import MaritimeDemoAdapter
 
 
 def _credential_gated_source(*, configured: bool, error_message: str) -> dict:
@@ -29,9 +32,19 @@ def _credential_gated_source(*, configured: bool, error_message: str) -> dict:
     }
 
 
+def _apply_ew_profile(definition: SourceDefinition) -> SourceDefinition:
+    profile = get_source_profile(definition.source_id)
+    return definition.model_copy(
+        update={
+            "ew_classification": EwClassification(profile.ew_classification.value),
+            "gnss_dependent": profile.gnss_dependent,
+            "ew_rationale": profile.rationale,
+        }
+    )
+
+
 def build_registry() -> SourceRegistry:
-    return SourceRegistry(
-        definitions=[
+    definitions = [
             SourceDefinition(
                 source_id="fmi",
                 name="Finnish Meteorological Institute",
@@ -89,8 +102,18 @@ def build_registry() -> SourceRegistry:
                 description="TLE orbital data for reconnaissance and imaging satellites.",
                 refresh_interval_seconds=43200,
             ),
-        ]
-    )
+    ]
+    if settings.consistency_maritime_demo:
+        definitions.append(
+            SourceDefinition(
+                source_id="maritime-demo",
+                name="Maritime AIS/SAR Demo",
+                category=SourceCategory.OTHER,
+                description="Demonstration AIS tracks and SAR returns for vessel cross-validation.",
+                refresh_interval_seconds=3600,
+            )
+        )
+    return SourceRegistry(definitions=[_apply_ew_profile(defn) for defn in definitions])
 
 
 def build_services():
@@ -104,13 +127,18 @@ def build_services():
         "osm-poi": OsmPoiAdapter(registry.get("osm-poi")),
         "satellites": SatelliteTleAdapter(registry.get("satellites")),
     }
+    if settings.consistency_maritime_demo:
+        adapters["maritime-demo"] = MaritimeDemoAdapter(registry.get("maritime-demo"))
     ingestion_service = IngestionService(registry=registry, adapters=adapters)
     scheduler = RefreshScheduler(ingestion_service=ingestion_service)
+    consistency_engine = DataConsistencyEngine(fmi_adapter=adapters.get("fmi"))
     return {
         "registry": registry,
         "ingestion_service": ingestion_service,
         "scheduler": scheduler,
         "adapters": adapters,
+        "consistency_engine": consistency_engine,
+        "last_consistency_report": None,
     }
 
 

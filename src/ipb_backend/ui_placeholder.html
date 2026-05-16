@@ -6,6 +6,7 @@
   <title>IPB AOI Workspace</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   <style>
     :root {
       --ink: #14261d;
@@ -666,6 +667,149 @@
       text-align: center;
     }
 
+    .area-select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.8);
+      font-size: 0.92rem;
+      margin-bottom: 8px;
+    }
+
+    .trust-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .trust-row {
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+      padding: 10px 12px;
+    }
+
+    .trust-row-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+
+    .trust-row-meta {
+      margin-top: 4px;
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .trust-bar {
+      margin-top: 8px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(20, 38, 29, 0.08);
+      overflow: hidden;
+    }
+
+    .trust-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 200ms ease;
+    }
+
+    .trust-high { background: #2a8a5c; }
+    .trust-mid { background: #c4a832; }
+    .trust-low { background: #c46c32; }
+    .trust-critical { background: #8a2d21; }
+
+    .ew-banner {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(138, 45, 33, 0.2);
+      background: rgba(196, 108, 50, 0.12);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    .anomaly-feed {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+
+    .anomaly-card {
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.78);
+      padding: 12px;
+      cursor: pointer;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+
+    .anomaly-card:hover {
+      border-color: rgba(33, 83, 71, 0.35);
+      box-shadow: 0 8px 18px rgba(20, 38, 29, 0.08);
+    }
+
+    .anomaly-card.is-active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(33, 83, 71, 0.2);
+    }
+
+    .anomaly-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .anomaly-title {
+      font-size: 0.9rem;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .severity-badge {
+      flex-shrink: 0;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .severity-low { background: rgba(196, 168, 50, 0.2); color: #6b5a12; }
+    .severity-medium { background: rgba(196, 108, 50, 0.18); color: #8a2d21; }
+    .severity-high { background: rgba(138, 45, 33, 0.16); color: #8a2d21; }
+    .severity-critical { background: rgba(92, 16, 16, 0.2); color: #5c1010; }
+
+    .anomaly-copy {
+      margin-top: 8px;
+      font-size: 0.84rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .anomaly-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .consistency-summary {
+      margin: 0 0 12px;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
     @media (max-width: 980px) {
       .workspace {
         flex-direction: column;
@@ -694,6 +838,12 @@
 
       <aside class="settings-panel" id="settings-panel">
         <div class="panel-card">
+          <div class="panel-title">Workspace Area</div>
+          <select class="area-select" id="area-select" aria-label="Target area">
+            <option value="North Karelia">North Karelia</option>
+            <option value="Archipelago Sea">Archipelago Sea</option>
+            <option value="Lapland (Käsivarren Lappi)">Lapland (Käsivarren Lappi)</option>
+          </select>
           <div class="panel-title">Selection Mode</div>
           <p class="panel-copy">Shift + left-click and hold on the map to draw an area of interest. The right-hand inspector updates from that polygon.</p>
           <div class="control-row">
@@ -710,6 +860,18 @@
           </button>
           <div class="panel-card-body" id="overlay-panel-body">
             <div class="overlay-list" id="overlay-controls"></div>
+          </div>
+        </div>
+
+        <div class="panel-card is-collapsible" id="trust-panel">
+          <button class="panel-card-header" id="trust-panel-toggle" type="button" aria-expanded="true">
+            <div class="panel-title">Source Trust</div>
+            <span class="collapse-icon">▾</span>
+          </button>
+          <div class="panel-card-body">
+            <p class="panel-copy">Per-layer confidence from the Data Consistency Engine.</p>
+            <div class="trust-list" id="trust-list"></div>
+            <div id="ew-pattern-banner"></div>
           </div>
         </div>
 
@@ -783,6 +945,18 @@
         </div>
       </div>
 
+      <div class="section is-collapsible" data-section id="consistency-section">
+        <button class="section-toggle" type="button" aria-expanded="true">
+          <div class="section-header">Data Trust &amp; Anomalies</div>
+          <span class="collapse-icon">▾</span>
+        </button>
+        <div class="section-body">
+          <p class="consistency-summary" id="consistency-summary">Run a workspace refresh to evaluate cross-source consistency.</p>
+          <p class="panel-copy" id="consistency-disclaimer"></p>
+          <div class="anomaly-feed" id="anomaly-feed"></div>
+        </div>
+      </div>
+
       <div class="section is-collapsible" data-section>
         <button class="section-toggle" type="button" aria-expanded="true">
           <div class="section-header">Source Freshness</div>
@@ -807,6 +981,7 @@
     </aside>
   </div>
 
+  <script src="/api/ui-consistency.js"></script>
   <script>
     const state = {
       bootstrapArea: "North Karelia",
@@ -829,9 +1004,15 @@
         line: null,
         polygon: null,
       },
+      consistencyReport: null,
+      heatmapLayer: null,
+      clusterLayer: null,
+      anomalyMarkers: {},
+      activeAnomalyId: null,
     };
 
     const timeframeInput = document.getElementById("timeframe-input");
+    const areaSelect = document.getElementById("area-select");
     const refreshBtn = document.getElementById("refresh-btn");
     const clearSelectionBtn = document.getElementById("clear-selection-btn");
     const overlayControls = document.getElementById("overlay-controls");
@@ -850,6 +1031,11 @@
     const settingsToggle = document.getElementById("settings-toggle");
     const overlayPanel = document.getElementById("overlay-panel");
     const overlayPanelToggle = document.getElementById("overlay-panel-toggle");
+    const trustList = document.getElementById("trust-list");
+    const ewPatternBanner = document.getElementById("ew-pattern-banner");
+    const consistencySummary = document.getElementById("consistency-summary");
+    const consistencyDisclaimer = document.getElementById("consistency-disclaimer");
+    const anomalyFeed = document.getElementById("anomaly-feed");
     const inspectorSections = document.querySelectorAll("[data-section]");
 
     const NLS_COLLECTIONS = [
@@ -900,7 +1086,20 @@
       { id: "bridges", label: "Bridges & Tunnels", color: "#c46c32" },
     ];
 
-    const ALL_OVERLAY_COLLECTIONS = [...NLS_COLLECTIONS, ...POI_COLLECTIONS, ...CELL_TOWER_COLLECTIONS, ...SATELLITE_COLLECTIONS, ...BRIDGE_COLLECTIONS];
+    const INTEGRITY_COLLECTIONS = [
+      { id: "consistency-anomaly", label: "Consistency anomalies", color: "#8a2d21" },
+      { id: "ais", label: "AIS tracks (demo)", color: "#195d85" },
+      { id: "sar", label: "SAR returns (demo)", color: "#2a8a5c" },
+    ];
+
+    const ALL_OVERLAY_COLLECTIONS = [
+      ...NLS_COLLECTIONS,
+      ...POI_COLLECTIONS,
+      ...CELL_TOWER_COLLECTIONS,
+      ...SATELLITE_COLLECTIONS,
+      ...BRIDGE_COLLECTIONS,
+      ...INTEGRITY_COLLECTIONS,
+    ];
 
     const OVERLAY_CATEGORIES = [
       {
@@ -932,10 +1131,26 @@
         ids: [],
         weatherToggle: true,
       },
+      {
+        name: "Data Integrity",
+        ids: ["consistency-anomaly", "ais", "sar"],
+        integrityToggles: true,
+      },
     ];
 
     const WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites"];
-    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["tieviiva", "rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites"]);
+    window.WORKSPACE_SOURCE_IDS = WORKSPACE_SOURCE_IDS;
+    const DEFAULT_VISIBLE_COLLECTIONS = new Set([
+      "tieviiva", "rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites",
+      "consistency-anomaly",
+    ]);
+
+    const SEVERITY_COLORS = {
+      low: "#c4a832",
+      medium: "#c46c32",
+      high: "#8a2d21",
+      critical: "#5c1010",
+    };
 
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
@@ -971,6 +1186,9 @@
       celltowers: { point: true, color: "#888" },
       satellites: { point: true, color: "#195d85" },
       bridges: { color: "#c46c32", weight: 2.5, fill: false },
+      "consistency-anomaly": { point: true, color: "#8a2d21" },
+      ais: { point: true, color: "#195d85" },
+      sar: { point: true, color: "#2a8a5c" },
     };
 
     function getCenter(area) {
@@ -1003,25 +1221,45 @@
 
       ALL_OVERLAY_COLLECTIONS.forEach((collection) => {
         const style = COLL_STYLE[collection.id] || { color: "#888", weight: 1 };
-        const layer = L.geoJSON(null, {
+        const layerOptions = {
           style: style.point ? undefined : style,
-          pointToLayer: (_, latlng) => L.circleMarker(latlng, {
-            radius: collection.id === "celltowers" ? 6 : 5,
-            fillColor: style.color || "#888",
-            color: "#fff",
-            weight: 1,
-            fillOpacity: 0.82,
-          }),
+          pointToLayer: (feature, latlng) => {
+            const props = feature.properties || {};
+            const severity = props.severity;
+            const fill = severity
+              ? (SEVERITY_COLORS[severity] || style.color)
+              : (style.color || "#888");
+            const radius = collection.id === "celltowers" ? 6
+              : collection.id === "consistency-anomaly" ? 9
+              : collection.id === "sar" ? 7
+              : 5;
+            return L.circleMarker(latlng, {
+              radius,
+              fillColor: fill,
+              color: collection.id === "consistency-anomaly" ? "#fff" : "#fff",
+              weight: collection.id === "consistency-anomaly" ? 2 : 1,
+              fillOpacity: 0.88,
+            });
+          },
           onEachFeature: (feature, layerRef) => {
             const props = feature.properties || {};
-            const name = props.nimi || props.namn || props.name || "";
+            const name = props.nimi || props.namn || props.name || props.title || "";
             const extra = props.radio ? `<br>Radio: ${props.radio}` : "";
             const pass = props.next_pass ? `<br>Next pass: ${props.next_pass}` : "";
-            layerRef.bindPopup(`<b>${collection.label}</b>${name ? `<br>${name}` : ""}${extra}${pass}`);
+            const severity = props.severity ? `<br>Severity: ${props.severity}` : "";
+            const desc = props.description ? `<br>${props.description}` : "";
+            layerRef.bindPopup(`<b>${collection.label}</b>${name ? `<br>${name}` : ""}${severity}${desc}${extra}${pass}`);
+            if (collection.id === "consistency-anomaly" && props.anomaly_id) {
+              layerRef.on("click", () => focusConsistencyAnomaly(props.anomaly_id));
+            }
           },
-        });
+        };
+        const layer = L.geoJSON(null, layerOptions);
         state.collectionLayers[collection.id] = layer;
       });
+
+      state.clusterLayer = L.layerGroup();
+      state.heatmapLayer = null;
 
       L.DomEvent.disableClickPropagation(settingsPanel);
       L.DomEvent.disableScrollPropagation(settingsPanel);
@@ -1172,6 +1410,27 @@
         const body = document.createElement("div");
         body.className = "overlay-category-body";
 
+        if (category.integrityToggles) {
+          category.ids.forEach((id) => {
+            const collection = collectionLookup[id];
+            if (collection) body.appendChild(buildOverlayControl(collection));
+          });
+          [
+            { id: "consistency-heatmap", label: "Anomaly heatmap", color: "#8a2d21" },
+            { id: "consistency-clusters", label: "EW cluster zones", color: "#5c1010" },
+          ].forEach((item) => {
+            const el = document.createElement("label");
+            el.className = "overlay-item";
+            el.innerHTML = `
+              <input type="checkbox" checked data-collection="${item.id}" />
+              <span class="overlay-swatch" style="background:${item.color}"></span>
+              <span>${item.label}</span>
+            `;
+            el.querySelector("input").addEventListener("change", toggleOverlay);
+            body.appendChild(el);
+          });
+        }
+
         if (category.weatherToggle) {
           const el = document.createElement("label");
           el.className = "overlay-item";
@@ -1226,6 +1485,18 @@
 
     function toggleOverlay(event) {
       const id = event.target.dataset.collection;
+      if (id === "consistency-heatmap") {
+        if (!state.heatmapLayer) return;
+        if (event.target.checked) state.heatmapLayer.addTo(state.map);
+        else state.map.removeLayer(state.heatmapLayer);
+        return;
+      }
+      if (id === "consistency-clusters") {
+        if (!state.clusterLayer) return;
+        if (event.target.checked) state.clusterLayer.addTo(state.map);
+        else state.map.removeLayer(state.clusterLayer);
+        return;
+      }
       if (id === "weather") {
         if (!state.weatherMarker) return;
         if (event.target.checked) {
@@ -1763,7 +2034,7 @@
       selectionMeta.textContent = `Bounds: ${payload.selection.bounds.map((value) => value.toFixed(3)).join(", ")}`;
       renderMetrics(payload.metrics);
       renderAgent(payload.agent);
-      renderFreshness(payload.freshness);
+      patchFreshnessWithTrust(payload.freshness);
       renderRawData(payload.raw_sections, payload.raw_data);
     }
 
@@ -1809,7 +2080,7 @@
           body: JSON.stringify({
             area: state.bootstrapArea,
             timeframe: state.timeframe,
-            source_ids: WORKSPACE_SOURCE_IDS,
+            source_ids: getWorkspaceSourceIds(),
           }),
         });
         if (!ingestResponse.ok) {
@@ -1843,13 +2114,15 @@
         renderOverlays();
         renderAgentButtons();
         renderWeather();
-        renderFreshness(state.sources);
+        await runConsistency();
+        patchFreshnessWithTrust(state.sources);
         await Promise.all([
           loadMapData(),
           loadPoiMapData(),
           loadCellTowerMapData(),
           loadSatelliteMapData(),
           loadBridgeMapData(),
+          loadMaritimeMapData(),
         ]);
 
         if (state.selectionGeometry) {
@@ -1878,11 +2151,12 @@
       state.latestInspection = null;
       selectionLabel.textContent = "No AOI selected";
       renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
-      renderFreshness(state.sources);
+      patchFreshnessWithTrust(state.sources);
       statusLine.textContent = "AOI cleared. Draw a new polygon when ready.";
     }
 
     const AGENTS_LIST = [
+      { id: "consistency-engine-agent", label: "Data Consistency Engine" },
       { id: "summary-agent", label: "Summary Agent" },
       { id: "celltower-agent", label: "Cell Tower Agent" },
       { id: "satellite-agent", label: "Satellite Agent" },
@@ -1925,6 +2199,14 @@
 
         const result = await response.json();
         displayAgentRunResult(agentId, result);
+        if (agentId === "consistency-engine-agent" && result.data) {
+          applyConsistencyReport(result.data);
+          const mapResp = await fetch(
+            `/api/map-data/consistency?area=${encodeURIComponent(state.bootstrapArea)}&timeframe=${encodeURIComponent(state.timeframe)}`
+          );
+          if (mapResp.ok) renderConsistencyMap(await mapResp.json());
+          patchFreshnessWithTrust(state.sources);
+        }
         statusLine.textContent = `${agentId} complete.`;
       } catch (error) {
         console.error(`Agent ${agentId} failed:`, error);
@@ -2029,6 +2311,26 @@
 
     refreshBtn.addEventListener("click", bootstrapWorkspace);
     clearSelectionBtn.addEventListener("click", clearSelection);
+
+    if (areaSelect) {
+      areaSelect.value = state.bootstrapArea;
+      areaSelect.addEventListener("change", () => {
+        state.bootstrapArea = areaSelect.value;
+        state.map.setView(getCenter(state.bootstrapArea), 9);
+        clearSelection();
+        bootstrapWorkspace();
+      });
+    }
+
+    const trustPanel = document.getElementById("trust-panel");
+    const trustPanelToggle = document.getElementById("trust-panel-toggle");
+    if (trustPanelToggle && trustPanel) {
+      trustPanelToggle.addEventListener("click", () => {
+        trustPanel.classList.toggle("is-collapsed");
+        const expanded = !trustPanel.classList.contains("is-collapsed");
+        trustPanelToggle.setAttribute("aria-expanded", String(expanded));
+      });
+    }
 
     renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
     bootstrapWorkspace();

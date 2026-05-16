@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     opencellid_api_key: str = ""
     space_track_username: str = ""
     space_track_password: str = ""
+    consistency_maritime_demo: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",
