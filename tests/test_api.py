@@ -172,13 +172,15 @@ def test_ui_demo_contains_workspace_shell():
     assert "Map Overlays" in response.text
     assert "AOI Metrics" in response.text
     assert "Agent Interpreter" in response.text
+    assert "Conversation Window" in response.text
+    assert "Analysis Profile" in response.text
     assert "Raw Data" in response.text
 
 
 def test_ingestion_flow_for_placeholder_sources(monkeypatch):
     state["ingestion_service"]._records.clear()
 
-    async def fake_statfin_fetch(self, area, timeframe):
+    async def fake_statfin_fetch(self, area, timeframe, load_target=None):
         return DatasetRecord(
             source_id="statistics-finland",
             category=SourceCategory.DEMOGRAPHICS,
@@ -188,7 +190,11 @@ def test_ingestion_flow_for_placeholder_sources(monkeypatch):
             data={"total": 170000, "population_total": 170000, "features": []},
         )
 
+    async def fake_nls_fetch_fail(self, area, timeframe, load_target=None):
+        raise ValueError("NLS_API_KEY not configured in .env")
+
     monkeypatch.setattr(StatisticsFinlandAdapter, "fetch", fake_statfin_fetch)
+    monkeypatch.setattr(NationalLandSurveyAdapter, "fetch", fake_nls_fetch_fail)
 
     ingest_response = client.post(
         "/api/ingest",
@@ -210,12 +216,6 @@ def test_ingestion_flow_for_placeholder_sources(monkeypatch):
     assert datasets_response.status_code == 200
     assert len(datasets_response.json()) == 2
 
-    sources_response = client.get("/api/sources")
-    assert sources_response.status_code == 200
-    nls_source = next(source for source in sources_response.json() if source["source_id"] == "nls")
-    assert nls_source["status"] == "disabled"
-    assert nls_source["last_error"] == "Disabled until NLS_API_KEY is configured."
-
 
 def test_ingest_rejects_unknown_source_ids():
     response = client.post(
@@ -229,6 +229,49 @@ def test_ingest_rejects_unknown_source_ids():
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Unknown source ids: missing-source"
+
+
+def test_ingest_accepts_bbox_load_target(monkeypatch):
+    state["ingestion_service"]._records.clear()
+
+    async def fake_fetch(self, area, timeframe, load_target=None):
+        assert area == "Custom Load Area"
+        assert timeframe == "24h"
+        assert load_target is not None
+        assert load_target.kind.value == "bbox"
+        assert load_target.label == "Custom Load Area"
+        assert load_target.bbox_wgs84 == [29.9, 62.4, 30.2, 62.7]
+        return DatasetRecord(
+            source_id="osm-poi",
+            category=SourceCategory.OTHER,
+            area="Custom Load Area",
+            timeframe="24h",
+            load_target=load_target,
+            summary="OSM POIs for Custom Load Area",
+            data={"categories": {}, "total_features": 0},
+        )
+
+    monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
+
+    response = client.post(
+        "/api/ingest",
+        json={
+            "area": "Custom Load Area",
+            "timeframe": "24h",
+            "load_target": {
+                "kind": "bbox",
+                "label": "Custom Load Area",
+                "bbox_wgs84": [29.9, 62.4, 30.2, 62.7],
+            },
+            "source_ids": ["osm-poi"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requested_sources"] == ["osm-poi"]
+    assert payload["produced_records"][0]["area"] == "Custom Load Area"
+    assert payload["produced_records"][0]["load_target"]["kind"] == "bbox"
 
 
 def test_fmi_ingestion_flow(monkeypatch):
@@ -405,6 +448,12 @@ def test_aoi_inspection_returns_clipped_source_data():
     assert payload["raw_sections"][0]["subsections"]
     assert payload["agent"]["provider"] == "rules"
     assert payload["agent"]["evidence_bundle"]
+    assert payload["data_package"]["selection"]["selection_type"] == "geometry"
+    assert payload["llm_input"]["profile_focus"]
+    assert payload["llm_input"]["source_digests"]
+    assert payload["data_package"]["quality"]["overall_confidence"] in {"high", "low", "medium"}
+    assert payload["llm_output"]["profile"] == "general"
+    assert payload["llm_output"]["implications"]
 
 
 def test_aoi_inspection_includes_additional_feature_sources():
@@ -460,6 +509,7 @@ def test_aoi_inspection_includes_additional_feature_sources():
     assert "custom-infra" in payload["metrics"]["active_sources"]
     assert any(section["source_id"] == "custom-infra" for section in payload["raw_sections"])
     assert any(item["source_id"] == "custom-infra" for item in payload["agent"]["evidence_bundle"])
+    assert any(item["source_id"] == "custom-infra" for item in payload["data_package"]["source_summaries"])
 
 SAMPLE_OPENCELLID_RECORD = DatasetRecord(
     source_id="opencellid",
@@ -485,7 +535,7 @@ def test_opencellid_ingestion(monkeypatch):
     registry = state["registry"]
     original_definition = registry.get("opencellid")
 
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_OPENCELLID_RECORD
 
     monkeypatch.setattr(OpenCellIdAdapter, "fetch", fake_fetch)
@@ -537,7 +587,7 @@ SAMPLE_OSM_RECORD = DatasetRecord(
 def test_osm_poi_ingestion(monkeypatch):
     state["ingestion_service"]._records.clear()
 
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_OSM_RECORD
 
     monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
@@ -596,7 +646,7 @@ SAMPLE_TLE_RECORD = DatasetRecord(
 def test_satellite_ingestion(monkeypatch):
     state["ingestion_service"]._records.clear()
 
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_TLE_RECORD
 
     monkeypatch.setattr(SatelliteTleAdapter, "fetch", fake_fetch)
@@ -626,7 +676,7 @@ def test_agents_listing():
 
 
 def test_celltower_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_OPENCELLID_RECORD
 
     monkeypatch.setattr(OpenCellIdAdapter, "fetch", fake_fetch)
@@ -643,7 +693,7 @@ def test_celltower_agent_run(monkeypatch):
 
 
 def test_satellite_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_TLE_RECORD
 
     monkeypatch.setattr(SatelliteTleAdapter, "fetch", fake_fetch)
@@ -714,7 +764,7 @@ SAMPLE_DIGIROAD_RECORD = DatasetRecord(
 
 
 def test_bridge_load_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_DIGIROAD_RECORD
 
     monkeypatch.setattr(DigiroadAdapter, "fetch", fake_fetch)
@@ -761,7 +811,7 @@ def test_bridge_load_agent_empty(monkeypatch):
         data={"collections": empty_collections, "total_features": 0},
     )
 
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return empty_record
 
     monkeypatch.setattr(DigiroadAdapter, "fetch", fake_fetch)
@@ -810,7 +860,7 @@ SAMPLE_DEMOGRAPHICS_RECORD = DatasetRecord(
 
 
 def test_demographics_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_DEMOGRAPHICS_RECORD
 
     monkeypatch.setattr(StatisticsFinlandAdapter, "fetch", fake_fetch)
@@ -849,7 +899,7 @@ SAMPLE_FOREST_RECORD = DatasetRecord(
 
 
 def test_forest_concealment_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_FOREST_RECORD
 
     monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
@@ -884,7 +934,7 @@ SAMPLE_WEATHER_RECORD = DatasetRecord(
 
 
 def test_weather_impact_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_WEATHER_RECORD
 
     monkeypatch.setattr(FmiAdapter, "fetch", fake_fetch)
@@ -920,7 +970,7 @@ SAMPLE_POWER_GRID_RECORD = DatasetRecord(
 
 
 def test_power_grid_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_POWER_GRID_RECORD
 
     monkeypatch.setattr(NationalLandSurveyAdapter, "fetch", fake_fetch)
@@ -944,7 +994,7 @@ def test_forest_concealment_agent_empty(monkeypatch):
         data={"categories": {"forest": []}, "total_features": 0},
     )
 
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return empty_record
 
     monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
@@ -1091,3 +1141,151 @@ def test_aoi_inspection_includes_osm_and_cell_sources():
     assert payload["metrics"]["geometry_counts"]["Point"] == 2
     assert any(section["source_id"] == "osm-poi" for section in payload["raw_sections"])
     assert any(section["source_id"] == "opencellid" for section in payload["raw_sections"])
+
+
+def test_aoi_data_package_endpoint_returns_normalized_contract():
+    state["ingestion_service"]._records.clear()
+    state["ingestion_service"]._records.extend(
+        [
+            DatasetRecord(
+                source_id="custom-infra",
+                category=SourceCategory.INFRASTRUCTURE,
+                area="North Karelia",
+                timeframe="72h",
+                summary="Custom infrastructure record",
+                data={
+                    "provider": "Custom Infrastructure Feed",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [30.35, 62.62],
+                            },
+                            "properties": {"name": "Tower site"},
+                        }
+                    ],
+                },
+            )
+        ]
+    )
+
+    response = client.post(
+        "/api/aoi/data-package",
+        json={
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[30.0, 62.4], [30.6, 62.4], [30.6, 62.85], [30.0, 62.85], [30.0, 62.4]]],
+            },
+            "timeframe": "72h",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "1.0"
+    assert payload["selection"]["selection_type"] == "geometry"
+    assert payload["counts"]["by_source"]["custom-infra"] == 1
+    assert payload["source_summaries"][0]["provenance"]["deterministic"] is True
+    assert payload["evidence_items"]
+
+
+def test_analysis_profiles_endpoint_lists_wrapper_profiles():
+    response = client.get("/api/analysis/profiles")
+
+    assert response.status_code == 200
+    payload = response.json()
+    profiles = {item["profile"] for item in payload}
+    assert "general" in profiles
+    assert "mobility" in profiles
+    assert "communications" in profiles
+
+
+def test_aoi_interpret_accepts_question_and_history():
+    response = client.post(
+        "/api/aoi/interpret",
+        json={
+            "profile": "mobility",
+            "question": "What matters most for movement?",
+            "conversation_history": [
+                {"role": "user", "content": "Give me a movement-focused read."}
+            ],
+            "data_package": {
+                "schema_version": "1.0",
+                "package_id": "pkg-1",
+                "generated_at": "2026-05-16T12:00:00Z",
+                "selection": {
+                    "selection_type": "geometry",
+                    "area_id": None,
+                    "label": None,
+                    "geometry": {"type": "Polygon", "coordinates": []},
+                    "bounds_wgs84": [30.0, 62.4, 30.6, 62.85],
+                    "area_sqkm": 10.0,
+                },
+                "scope": {
+                    "timeframe": "72h",
+                    "requested_sources": ["digiroad"],
+                    "resolved_sources": ["digiroad"],
+                },
+                "source_freshness": [],
+                "source_summaries": [
+                    {
+                        "source_id": "digiroad",
+                        "category": "infrastructure",
+                        "title": "Digiroad",
+                        "summary": "1 transport feature intersects the AOI",
+                        "raw_summary": {"feature_count": 1},
+                        "confidence": "high",
+                        "provenance": {
+                            "provider": "Digiroad",
+                            "adapter": "DatasetRecord",
+                            "retrieved_at": None,
+                            "fallback_used": False,
+                            "fallback_reason": None,
+                            "deterministic": True,
+                            "note": None,
+                        },
+                    }
+                ],
+                "counts": {
+                    "by_source": {"digiroad": 1},
+                    "by_category": {"infrastructure": 1},
+                    "geometry_types": {"LineString": 1},
+                },
+                "derived_indicators": [
+                    {
+                        "indicator_id": "selection_area_sqkm",
+                        "name": "Selection Area",
+                        "value": 10.0,
+                        "unit": "sqkm",
+                        "method": "polygon_area",
+                        "source_ids": [],
+                        "confidence": "high",
+                        "notes": [],
+                    }
+                ],
+                "evidence_items": [
+                    {
+                        "evidence_id": "ev-digiroad-001",
+                        "source_id": "digiroad",
+                        "kind": "count-summary",
+                        "title": "digiroad evidence 1",
+                        "detail": "1 intersecting feature",
+                        "support": "Transport link",
+                        "data_ref": {"section": "source_summaries", "path": "source_summaries[0].raw_summary"},
+                    }
+                ],
+                "quality": {
+                    "fallback_sources": [],
+                    "error_sources": [],
+                    "coverage_gaps": [],
+                    "overall_confidence": "high",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["profile"] == "mobility"
+    assert payload["summary"].startswith("Question received:")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional
 
@@ -14,19 +16,20 @@ from ipb_backend.agents.forest_concealment import ForestConcealmentAgent
 from ipb_backend.agents.placeholders import SummaryAgent
 from ipb_backend.agents.power_grid import PowerGridAgent
 from ipb_backend.agents.satellite import SatelliteAgent
-from ipb_backend.agents.consistency import ConsistencyEngineAgent
 from ipb_backend.agents.weather_impact import WeatherImpactAgent
-from ipb_backend.models import ConsistencyReport
 from ipb_backend.analysis import (
     RulesAnalyzer,
     build_analyzer,
     build_aoi_metrics,
+    build_data_package,
     build_evidence_bundle,
     build_raw_sections,
     get_analyzer_health,
 )
+from ipb_backend.analysis.contracts import DataPackage
 from ipb_backend.config import settings
 from ipb_backend.ingestion.sources.fmi import FmiAdapter
+from ipb_backend.llm import LlmAnalysisOutput, LlmInterpretRequest, build_llm_wrapper_input, list_profile_specs
 from ipb_backend.models import (
     AoiInspectionRequest,
     AoiInspectionResponse,
@@ -37,6 +40,13 @@ from ipb_backend.models import (
     UiLayer,
     UiPlaceholderResponse,
 )
+from ipb_backend.planning import (
+    OPERATION_PROFILES,
+    PlanningRequest,
+    PlanningResponse,
+    recommend_sites,
+)
+from ipb_backend.planning.explainer import enrich_with_narratives
 from ipb_backend.spatial import clip_geojson_feature, geojson_to_shape, polygon_area_sqkm
 
 router = APIRouter()
@@ -67,6 +77,18 @@ def _latest_records_by_source(records):
         if current is None or record.retrieved_at > current.retrieved_at:
             latest[record.source_id] = record
     return latest
+
+
+def _record_for_area_or_latest(records, source_id: str, area: Optional[str] = None):
+    matching = [record for record in records if record.source_id == source_id]
+    if not matching:
+        return None
+    if area:
+        for record in reversed(matching):
+            if record.area == area:
+                return record
+        return None
+    return max(matching, key=lambda record: record.retrieved_at)
 
 
 def _collection_summary(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -320,6 +342,17 @@ def _clip_record_for_aoi(record: DatasetRecord, mask, source_name: Optional[str]
     payload["category"] = record.category.value
     if source_name:
         payload["title"] = source_name
+    note = str(record.data.get("note", "") or "")
+    fallback_used = "demo" in note.lower() or "fallback" in note.lower() or "demo data" in str(record.data.get("provider", "")).lower()
+    payload["provenance"] = {
+        "provider": str(record.data.get("provider") or source_name or record.source_id),
+        "adapter": type(record).__name__,
+        "retrieved_at": record.retrieved_at,
+        "fallback_used": fallback_used,
+        "fallback_reason": "demo-fallback" if fallback_used else None,
+        "deterministic": True,
+        "note": note or None,
+    }
     return payload
 
 
@@ -332,12 +365,56 @@ def _build_freshness(services, latest_records):
                 "source_id": source.source_id,
                 "name": source.name,
                 "status": source.status,
+                "category": source.category.value,
                 "last_successful_refresh": source.last_successful_refresh,
                 "last_error": source.last_error,
                 "retrieved_at": record.retrieved_at if record else None,
+                "refresh_interval_seconds": source.refresh_interval_seconds,
+                "freshness_label": "fresh" if record is not None and source.last_error is None else "stale",
             }
         )
     return freshness
+
+
+def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], DataPackage]:
+    mask = geojson_to_shape(request.geometry)
+    if mask.is_empty:
+        raise HTTPException(status_code=400, detail="AOI geometry is empty")
+    if mask.geom_type == "MultiPolygon":
+        mask = max(getattr(mask, "geoms", [mask]), key=lambda geom: geom.area)
+    elif mask.geom_type != "Polygon":
+        raise HTTPException(status_code=400, detail="AOI geometry must be a Polygon or MultiPolygon")
+
+    latest_records = _latest_records_by_source(services["ingestion_service"].records)
+    raw_data: dict[str, Any] = {}
+    source_names = {
+        definition.source_id: definition.name
+        for definition in services["registry"].list_sources()
+    }
+
+    for record in latest_records.values():
+        raw_data[record.source_id] = _clip_record_for_aoi(
+            record,
+            mask,
+            source_name=source_names.get(record.source_id),
+        )
+
+    selection = {
+        "geometry": request.geometry,
+        "bounds": list(mask.bounds),
+        "area_sqkm": polygon_area_sqkm(mask),
+    }
+    freshness = _build_freshness(services, latest_records)
+    metrics = build_aoi_metrics(selection["area_sqkm"], raw_data)
+    evidence_bundle = build_evidence_bundle(metrics, raw_data)
+    data_package = build_data_package(
+        selection=selection,
+        timeframe=request.timeframe or "latest",
+        raw_data=raw_data,
+        freshness=freshness,
+        requested_sources=list(latest_records.keys()),
+    )
+    return selection, raw_data, freshness, metrics, evidence_bundle, data_package
 
 
 @router.get("/health")
@@ -351,47 +428,8 @@ async def analysis_health():
 
 
 @router.get("/sources")
-async def list_sources(
-    services=Depends(get_services),
-    include_trust: bool = Query(default=False),
-):
-    sources = services["registry"].list_sources()
-    if not include_trust:
-        return sources
-    report: ConsistencyReport | None = services.get("last_consistency_report")
-    trust_by_id = {layer.source_id: layer for layer in report.layer_trust} if report else {}
-    enriched = []
-    for source in sources:
-        payload = source.model_dump()
-        trust = trust_by_id.get(source.source_id)
-        payload["trust"] = trust.model_dump() if trust else None
-        enriched.append(payload)
-    return enriched
-
-
-@router.post("/consistency/run", response_model=ConsistencyReport)
-async def run_consistency(
-    area: str,
-    timeframe: str,
-    services=Depends(get_services),
-):
-    records = _latest_records_by_source(services["ingestion_service"].records)
-    report = await services["consistency_engine"].evaluate(
-        area=area,
-        timeframe=timeframe,
-        records=records,
-        sources=services["registry"].list_sources(),
-    )
-    services["last_consistency_report"] = report
-    return report
-
-
-@router.get("/consistency/report", response_model=ConsistencyReport)
-async def get_consistency_report(services=Depends(get_services)):
-    report = services.get("last_consistency_report")
-    if report is None:
-        raise HTTPException(status_code=404, detail="No consistency report. POST /api/consistency/run first.")
-    return report
+async def list_sources(services=Depends(get_services)):
+    return services["registry"].list_sources()
 
 
 @router.post("/ingest")
@@ -405,6 +443,12 @@ async def ingest(request: IngestionRequest, services=Depends(get_services)):
 @router.get("/datasets")
 async def list_datasets(services=Depends(get_services)):
     return services["ingestion_service"].records
+
+
+@router.get("/weather/current")
+async def current_weather(area: str = Query("North Karelia"), services=Depends(get_services)):
+    record = _record_for_area_or_latest(services["ingestion_service"].records, "fmi", area)
+    return {"record": record}
 
 
 @router.get("/ui-placeholder", response_model=UiPlaceholderResponse)
@@ -478,7 +522,7 @@ async def map_layers():
 @router.get("/map-data/nls")
 async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
-    nls_record = next((r for r in records if r.source_id == "nls" and r.area == area), None)
+    nls_record = _record_for_area_or_latest(records, "nls", area)
     if nls_record is None:
         return {"type": "FeatureCollection", "features": [], "available": False, "reason": "missing"}
 
@@ -509,7 +553,7 @@ async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_
 @router.get("/map-data/digiroad")
 async def map_data_digiroad(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
-    record = next((r for r in records if r.source_id == "digiroad" and r.area == area), None)
+    record = _record_for_area_or_latest(records, "digiroad", area)
     if record is None:
         return {"type": "FeatureCollection", "features": [], "available": False}
     bridge_coll_id = "dr_tielinkki_silta_alikulku_tunneli"
@@ -536,7 +580,7 @@ async def map_data_digiroad(area: str = Query("North Karelia"), services=Depends
 @router.get("/map-data/opencellid")
 async def map_data_opencellid(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
-    record = next((r for r in records if r.source_id == "opencellid" and r.area == area), None)
+    record = _record_for_area_or_latest(records, "opencellid", area)
     if record is None:
         return {"type": "FeatureCollection", "features": [], "available": False}
     cells = record.data.get("cells", [])
@@ -567,10 +611,10 @@ async def map_data_opencellid(area: str = Query("North Karelia"), services=Depen
 @router.get("/map-data/osm-poi")
 async def map_data_osm_poi(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
-    record = next((r for r in records if r.source_id == "osm-poi" and r.area == area), None)
-    if record is None:
+    record = _record_for_area_or_latest(records, "osm-poi", area)
+    categories = record.data.get("categories", {}) if record is not None else None
+    if not categories:
         return {"type": "FeatureCollection", "features": [], "available": False}
-    categories = record.data.get("categories", {})
     features = []
     for cat_id, items in categories.items():
         label = cat_id.replace("_", " ").title()
@@ -593,121 +637,10 @@ async def map_data_osm_poi(area: str = Query("North Karelia"), services=Depends(
     return {"type": "FeatureCollection", "features": features, "available": True}
 
 
-@router.get("/map-data/maritime")
-async def map_data_maritime(area: str = Query("Archipelago Sea"), services=Depends(get_services)):
-    from ipb_backend.consistency.fixtures import ARCHIPELAGO_MARITIME_FIXTURE
-
-    records = services["ingestion_service"].records
-    record = next((r for r in records if r.source_id == "maritime-demo"), None)
-    if record is not None:
-        ais_vessels = record.data.get("ais_vessels", [])
-        sar_returns = record.data.get("sar_returns", [])
-    elif "archipelago" in area.lower():
-        ais_vessels = ARCHIPELAGO_MARITIME_FIXTURE["ais_vessels"]
-        sar_returns = ARCHIPELAGO_MARITIME_FIXTURE["sar_returns"]
-    else:
-        return {"type": "FeatureCollection", "features": [], "available": False}
-
-    features: list[dict[str, Any]] = []
-    for vessel in ais_vessels:
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [vessel["lon"], vessel["lat"]]},
-                "properties": {
-                    "_collection": "ais",
-                    "_label": "AIS track",
-                    "name": vessel.get("name", ""),
-                    "mmsi": vessel.get("mmsi", ""),
-                },
-            }
-        )
-    for index, sar in enumerate(sar_returns):
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [sar["lon"], sar["lat"]]},
-                "properties": {
-                    "_collection": "sar",
-                    "_label": "SAR return",
-                    "return_id": index + 1,
-                    "confidence": sar.get("confidence"),
-                },
-            }
-        )
-    return {
-        "type": "FeatureCollection",
-        "features": features,
-        "available": True,
-        "message": f"{len(ais_vessels)} AIS tracks, {len(sar_returns)} SAR returns",
-    }
-
-
-@router.get("/map-data/consistency")
-async def map_data_consistency(
-    area: str = Query("North Karelia"),
-    timeframe: str = Query("72h"),
-    services=Depends(get_services),
-):
-    report: ConsistencyReport | None = services.get("last_consistency_report")
-    if report is None or report.area != area or report.timeframe != timeframe:
-        records = _latest_records_by_source(services["ingestion_service"].records)
-        report = await services["consistency_engine"].evaluate(
-            area=area,
-            timeframe=timeframe,
-            records=records,
-            sources=services["registry"].list_sources(),
-        )
-        services["last_consistency_report"] = report
-
-    severity_weight = {"low": 0.35, "medium": 0.6, "high": 0.85, "critical": 1.0}
-    features: list[dict[str, Any]] = []
-    for anomaly in report.anomalies:
-        location = anomaly.location
-        if not location:
-            continue
-        geometry = location
-        if location.get("type") != "Point" and location.get("lat") is not None:
-            geometry = {
-                "type": "Point",
-                "coordinates": [location["lon"], location["lat"]],
-            }
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": geometry,
-                "properties": {
-                    "_collection": "consistency-anomaly",
-                    "anomaly_id": anomaly.anomaly_id,
-                    "rule_id": anomaly.rule_id,
-                    "title": anomaly.title,
-                    "description": anomaly.description,
-                    "severity": anomaly.severity.value,
-                    "intensity": severity_weight.get(anomaly.severity.value, 0.5),
-                    "vulnerable_sources": anomaly.vulnerable_sources,
-                    "immune_sources": anomaly.immune_sources,
-                    "synthetic_demo": anomaly.synthetic_demo,
-                },
-            }
-        )
-
-    return {
-        "type": "FeatureCollection",
-        "features": features,
-        "clusters": [cluster.model_dump() for cluster in report.clusters],
-        "layer_trust": [layer.model_dump() for layer in report.layer_trust],
-        "summary": report.summary,
-        "ew_pattern_detected": report.ew_pattern_detected,
-        "disclaimer": report.disclaimer,
-        "anomaly_count": len(report.anomalies),
-        "available": True,
-    }
-
-
 @router.get("/map-data/satellites")
 async def map_data_satellites(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
-    record = next((r for r in records if r.source_id == "satellites" and r.area == area), None)
+    record = _record_for_area_or_latest(records, "satellites", area)
     if record is None:
         return {"type": "FeatureCollection", "features": [], "available": False}
     satellites = record.data.get("satellites", {})
@@ -751,41 +684,20 @@ async def weather_point(lat: float = Query(...), lon: float = Query(...), timefr
 @router.post("/aoi/inspect", response_model=AoiInspectionResponse)
 async def inspect_aoi(request: AoiInspectionRequest, services=Depends(get_services)):
     try:
-        mask = geojson_to_shape(request.geometry)
+        selection, raw_data, freshness, metrics, evidence_bundle, data_package = _build_aoi_snapshot(request, services)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid AOI geometry: {exc}") from exc
 
-    if mask.is_empty:
-        raise HTTPException(status_code=400, detail="AOI geometry is empty")
-    if mask.geom_type == "MultiPolygon":
-        mask = max(getattr(mask, "geoms", [mask]), key=lambda geom: geom.area)
-    elif mask.geom_type != "Polygon":
-        raise HTTPException(status_code=400, detail="AOI geometry must be a Polygon or MultiPolygon")
-
-    latest_records = _latest_records_by_source(services["ingestion_service"].records)
-    raw_data: dict[str, Any] = {}
-    source_names = {
-        definition.source_id: definition.name
-        for definition in services["registry"].list_sources()
-    }
-
-    for record in latest_records.values():
-        raw_data[record.source_id] = _clip_record_for_aoi(
-            record,
-            mask,
-            source_name=source_names.get(record.source_id),
-        )
-
-    selection = {
-        "geometry": request.geometry,
-        "bounds": list(mask.bounds),
-    }
-    freshness = _build_freshness(services, latest_records)
-    metrics = build_aoi_metrics(polygon_area_sqkm(mask), raw_data)
-    evidence_bundle = build_evidence_bundle(metrics, raw_data)
     analyzer = build_analyzer()
+    llm_input = build_llm_wrapper_input(
+        data_package=data_package,
+        profile=request.profile,
+    )
     try:
         agent = await analyzer.analyze(
+            data_package=data_package.model_dump(mode="json"),
+            llm_input=llm_input.model_dump(mode="json"),
+            profile=request.profile,
             selection=selection,
             metrics=metrics,
             raw_data=raw_data,
@@ -795,6 +707,9 @@ async def inspect_aoi(request: AoiInspectionRequest, services=Depends(get_servic
     except Exception as exc:
         fallback = RulesAnalyzer()
         agent = await fallback.analyze(
+            data_package=data_package.model_dump(mode="json"),
+            llm_input=llm_input.model_dump(mode="json"),
+            profile=request.profile,
             selection=selection,
             metrics=metrics,
             raw_data=raw_data,
@@ -810,19 +725,56 @@ async def inspect_aoi(request: AoiInspectionRequest, services=Depends(get_servic
         raw_data=raw_data,
         raw_sections=build_raw_sections(raw_data),
         freshness=freshness,
+        data_package=data_package,
+        llm_input=llm_input,
+        llm_output=LlmAnalysisOutput.model_validate(agent.get("output", {})),
         agent=agent,
     )
 
 
-UI_CONSISTENCY_PATH = Path(__file__).resolve().parents[1] / "ui_consistency.js"
+@router.post("/aoi/data-package", response_model=DataPackage)
+async def aoi_data_package(request: AoiInspectionRequest, services=Depends(get_services)):
+    try:
+        _, _, _, _, _, data_package = _build_aoi_snapshot(request, services)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid AOI geometry: {exc}") from exc
+    return data_package
 
 
-@router.get("/ui-consistency.js")
-async def ui_consistency_js():
-    return Response(
-        content=UI_CONSISTENCY_PATH.read_text(encoding="utf-8"),
-        media_type="application/javascript",
+@router.post("/aoi/interpret", response_model=LlmAnalysisOutput)
+async def aoi_interpret(request: LlmInterpretRequest):
+    analyzer = build_analyzer()
+    llm_input = build_llm_wrapper_input(
+        data_package=request.data_package,
+        profile=request.profile,
+        question=request.question,
+        conversation_history=request.conversation_history,
     )
+    try:
+        result = await analyzer.analyze(
+            data_package=request.data_package.model_dump(mode="json"),
+            llm_input=llm_input.model_dump(mode="json"),
+            profile=request.profile,
+            question=request.question,
+            conversation_history=[item.model_dump(mode="json") for item in request.conversation_history],
+        )
+    except Exception as exc:
+        fallback = RulesAnalyzer()
+        result = await fallback.analyze(
+            data_package=request.data_package.model_dump(mode="json"),
+            llm_input=llm_input.model_dump(mode="json"),
+            profile=request.profile,
+            question=request.question,
+            conversation_history=[item.model_dump(mode="json") for item in request.conversation_history],
+        )
+        result["status"] = "fallback"
+        result["error"] = str(exc)
+    return LlmAnalysisOutput.model_validate(result.get("output", {}))
+
+
+@router.get("/analysis/profiles")
+async def analysis_profiles():
+    return list_profile_specs()
 
 
 @router.get("/ui-demo", response_class=HTMLResponse)
@@ -881,12 +833,6 @@ async def list_agents():
             purpose="Analyzes power line infrastructure density and identifies chokepoints for logistics assessment.",
             status="active",
         ),
-        AgentDefinition(
-            agent_id="consistency-engine-agent",
-            name="Data Consistency Engine",
-            purpose="Cross-validates EW-vulnerable feeds against immune baselines; flags anomalies and trust scores.",
-            status="active",
-        ),
     ]
 
 
@@ -929,16 +875,52 @@ async def run_agent(agent_id: str, area: str, timeframe: str, services=Depends(g
         if not adapter:
             return {"error": "NLS adapter not available"}
         return await PowerGridAgent(adapter).run(area=area, timeframe=timeframe)
-    if agent_id == "consistency-engine-agent":
-        engine = services.get("consistency_engine")
-        if not engine:
-            return {"error": "Consistency engine not available"}
-        agent = ConsistencyEngineAgent(
-            engine=engine,
-            ingestion_service=services["ingestion_service"],
-            registry=services["registry"],
-        )
-        result = await agent.run(area=area, timeframe=timeframe)
-        services["last_consistency_report"] = ConsistencyReport.model_validate(result.data)
-        return result
     return {"error": f"Unknown agent: {agent_id}"}
+
+
+@router.get("/planning/profiles")
+async def planning_profiles():
+    return {
+        "operation_types": [
+            {"id": op_type.value, "weights": weights}
+            for op_type, weights in OPERATION_PROFILES.items()
+        ]
+    }
+
+
+@router.post("/planning/recommend", response_model=PlanningResponse)
+async def planning_recommend(
+    request: PlanningRequest, services=Depends(get_services)
+) -> PlanningResponse:
+    try:
+        records = services["ingestion_service"].records
+        latest = _latest_records_by_source(records)
+        freshness = _build_freshness(services, latest)
+
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                partial(recommend_sites, request, records=list(latest.values()), freshness=freshness),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if request.explain:
+            try:
+                response = await enrich_with_narratives(
+                    response, request.force, request.operation
+                )
+            except Exception as exc:
+                response = response.model_copy(
+                    update={
+                        "notes": response.notes
+                        + [f"Explainer disabled due to error: {exc}"]
+                    }
+                )
+
+        return response
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=f"Planning failed: {exc}") from exc

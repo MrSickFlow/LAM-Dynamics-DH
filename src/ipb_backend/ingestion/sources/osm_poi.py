@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import unicodedata
 from typing import Any
@@ -7,7 +8,8 @@ from typing import Any
 import httpx
 
 from ipb_backend.ingestion.base import SourceAdapter
-from ipb_backend.models import DatasetRecord
+from ipb_backend.models import DatasetRecord, LoadTarget
+from ipb_backend.spatial import format_bbox, resolve_load_target_bbox, resolve_load_target_label
 
 AREA_BBOXES: dict[str, tuple[float, float, float, float]] = {
     "archipelago sea": (59.7, 21.0, 60.6, 23.0),
@@ -42,6 +44,7 @@ CATEGORY_QUERIES: dict[str, str] = {
 
 FOREST_TAGS = {"leaf_type", "leaf_cycle", "natural", "landuse", "name", "wood"}
 
+
 def _filter_tags(tags: dict[str, str], category: str = "") -> dict[str, str]:
     if category == "forest":
         allowed = FOREST_TAGS
@@ -63,75 +66,80 @@ def _feature_to_poi(el: dict[str, Any], category: str = "") -> dict[str, Any]:
     }
 
 
+_CATEGORY_MAP: dict[str, str] = {
+    "school": "education", "university": "education", "college": "education",
+    "kindergarten": "education", "childcare": "education", "library": "education",
+    "hospital": "healthcare", "clinic": "healthcare", "doctors": "healthcare",
+    "dentist": "healthcare", "pharmacy": "healthcare", "veterinary": "healthcare",
+    "drinking_water": "water_sources", "spring": "water_sources",
+    "water_tower": "water_sources", "water_well": "water_sources", "water_works": "water_sources",
+    "place_of_worship": "religion", "christian": "religion",
+    "police": "emergency_services", "fire_station": "emergency_services",
+    "ambulance_station": "emergency_services",
+    "townhall": "government", "courthouse": "government", "prison": "government",
+    "embassy": "government", "community_centre": "government",
+    "bus_station": "transport", "ferry_terminal": "transport", "fuel": "transport",
+    "bus_stop": "transport",
+    "reservoir": "industry", "storage_tank": "industry",
+    "wood": "forest", "forest": "forest",
+}
+
+
 class OsmPoiAdapter(SourceAdapter):
     BASE_URL = "https://overpass-api.de/api/interpreter"
+    REQUEST_TIMEOUT = httpx.Timeout(12.0, connect=5.0)
 
     def _resolve_bbox(self, area: str) -> tuple[float, float, float, float]:
         normalized = self._normalize_area(area)
         return AREA_BBOXES.get(normalized, AREA_BBOXES["north karelia"])
 
-    def _build_demo_categories(self, bbox: tuple[float, float, float, float]) -> dict[str, list[dict[str, Any]]]:
-        center_lat = (bbox[0] + bbox[2]) / 2
-        center_lon = (bbox[1] + bbox[3]) / 2
-        import random
-        rng = random.Random(hash(bbox))
-
-        demo_pois: dict[str, list[dict[str, Any]]] = {}
-        for cat_name in CATEGORY_QUERIES:
-            count = rng.randint(3, 8)
-            pois = []
-            for i in range(count):
-                lat = center_lat + rng.uniform(-0.08, 0.08)
-                lon = center_lon + rng.uniform(-0.08, 0.08)
-                pois.append({
-                    "id": f"demo/{cat_name}/{i}",
-                    "type": "node", "osm_id": 9999000 + i,
-                    "lat": round(lat, 5), "lon": round(lon, 5),
-                    "tags": {"name": f"Demo {cat_name} {i}", "amenity": cat_name},
-                })
-            demo_pois[cat_name] = pois
-        return demo_pois
-
-    async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
-        bbox = self._resolve_bbox(area)
-        bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+    async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
+        bbox = resolve_load_target_bbox(area, load_target)
+        area_label = resolve_load_target_label(area, load_target)
+        bbox_str = format_bbox(bbox)
 
         categories: dict[str, list[dict[str, Any]]] = {}
         category_errors: dict[str, str] = {}
         total = 0
+        provider = "OpenStreetMap contributors (ODbL)"
 
-        async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
-            for cat_name, cat_query in CATEGORY_QUERIES.items():
-                query = f'[out:json];({cat_query.format(bbox=bbox_str)});out center 200;'
-                try:
-                    resp = await client.post(self.BASE_URL, data={"data": query})
-                    resp.raise_for_status()
-                    data = resp.json()
-                    pois = [_feature_to_poi(el, cat_name) for el in data.get("elements", [])]
-                except Exception as e:
-                    pois = []
-                    category_errors[cat_name] = str(e)
+        async def fetch_category(client: httpx.AsyncClient, cat_name: str, cat_query: str) -> tuple[str, list[dict[str, Any]], str | None]:
+            query = f'[out:json];({cat_query.format(bbox=bbox_str)});out center 200;'
+            try:
+                resp = await client.post(self.BASE_URL, data={"data": query})
+                resp.raise_for_status()
+                data = resp.json()
+                pois = [_feature_to_poi(el, cat_name) for el in data.get("elements", [])]
+                return cat_name, pois, None
+            except Exception as exc:
+                return cat_name, [], str(exc)
 
+        async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
+            results = await asyncio.gather(
+                *(fetch_category(client, cat_name, cat_query) for cat_name, cat_query in CATEGORY_QUERIES.items())
+            )
+            for cat_name, pois, error in results:
+                if error:
+                    category_errors[cat_name] = error
                 categories[cat_name] = pois
                 total += len(pois)
 
         if category_errors and len(category_errors) == len(CATEGORY_QUERIES):
-            categories = self._build_demo_categories(bbox)
-            total = sum(len(pois) for pois in categories.values())
-            provider = "Demo data (Overpass API unreachable)"
-        else:
-            provider = "OpenStreetMap contributors (ODbL)"
+            error_summary = "; ".join(f"{cat}: {err}" for cat, err in sorted(category_errors.items()))
+            raise ValueError(f"OSM POI fetch failed for all categories ({error_summary})")
+
         return DatasetRecord(
             source_id=self.definition.source_id,
             category=self.definition.category,
-            area=area,
+            area=area_label,
             timeframe=timeframe,
-            summary=f"OSM POIs for {area}: {total} features across {len(categories)} categories",
+            load_target=load_target,
+            summary=f"OSM POIs for {area_label}: {total} features across {len(categories)} categories",
             data={
                 "provider": provider,
                 "api": "Overpass API",
                 "license": "ODbL",
-                "query": {"area": area, "bbox": bbox_str},
+                "query": {"area": area_label, "bbox": bbox_str},
                 "categories": {k: v for k, v in sorted(categories.items())},
                 "errors": category_errors,
                 "total_features": total,

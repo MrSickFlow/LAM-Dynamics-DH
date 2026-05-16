@@ -9,7 +9,7 @@ from typing import Any, Optional
 import httpx
 
 from ipb_backend.ingestion.base import SourceAdapter
-from ipb_backend.models import DatasetRecord
+from ipb_backend.models import DatasetRecord, LoadTarget
 
 AREA_CENTERS: dict[str, dict[str, float]] = {
     "north karelia": {"lat": 62.8, "lon": 30.2},
@@ -196,7 +196,7 @@ class SatelliteTleAdapter(SourceAdapter):
                 break
         return result
 
-    async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
+    async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
         from ipb_backend.config import settings
 
         center = self._resolve_center(area)

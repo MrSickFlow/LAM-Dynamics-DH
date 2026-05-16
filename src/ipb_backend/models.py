@@ -6,6 +6,9 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from ipb_backend.analysis.contracts import DataPackage
+from ipb_backend.llm.contracts import AnalysisProfile, LlmAnalysisOutput, LlmInterpretRequest, LlmWrapperInput
+
 
 class SourceCategory(str, Enum):
     TERRAIN = "terrain"
@@ -23,11 +26,25 @@ class SourceStatus(str, Enum):
     DISABLED = "disabled"
 
 
+class LoadTargetKind(str, Enum):
+    NAMED_AREA = "named_area"
+    BBOX = "bbox"
+    GEOMETRY = "geometry"
+
+
+class LoadTarget(BaseModel):
+    kind: LoadTargetKind
+    label: Optional[str] = None
+    bbox_wgs84: Optional[list[float]] = None
+    geometry: Optional[dict[str, Any]] = None
+
+
 class DatasetRecord(BaseModel):
     source_id: str
     category: SourceCategory
     area: str
     timeframe: str
+    load_target: Optional[LoadTarget] = None
     retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     summary: str
     data: dict[str, Any]
@@ -118,8 +135,9 @@ class ConsistencyReport(BaseModel):
 
 
 class IngestionRequest(BaseModel):
-    area: str
+    area: str = "North Karelia"
     timeframe: str
+    load_target: Optional[LoadTarget] = None
     source_ids: Optional[list[str]] = None
 
 
@@ -131,6 +149,7 @@ class IngestionResult(BaseModel):
 class AoiInspectionRequest(BaseModel):
     geometry: dict[str, Any]
     timeframe: Optional[str] = None
+    profile: AnalysisProfile = AnalysisProfile.GENERAL
 
 
 class AoiInspectionResponse(BaseModel):
@@ -139,6 +158,9 @@ class AoiInspectionResponse(BaseModel):
     raw_data: dict[str, Any]
     raw_sections: list[dict[str, Any]]
     freshness: list[dict[str, Any]]
+    data_package: DataPackage
+    llm_input: LlmWrapperInput
+    llm_output: LlmAnalysisOutput
     agent: dict[str, Any]
 
 
