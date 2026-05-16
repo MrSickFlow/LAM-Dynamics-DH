@@ -1392,6 +1392,7 @@
       pointMarker: null,
       weatherPickerActive: false,
       pointInspectorActive: false,
+      satelliteFootprint: null,
       pointWeatherData: null,
       pointSnapshot: null,
       selectionLayer: null,
@@ -1691,6 +1692,47 @@
       }, 400);
     }
 
+    // Approximate sensor swath widths (km) keyed by satellite type string.
+    // Swath = the width of the strip imaged during one pass.
+    const SAT_SWATH_KM = {
+      "KH-11 optical reconnaissance":  15,   // estimated; classified
+      "Commercial imaging (50cm)":     20,   // WorldView-1 / Pleiades
+      "Commercial imaging (46cm)":     16,   // WorldView-2
+      "Commercial imaging (31cm)":     13,   // WorldView-3
+      "Commercial imaging (41cm)":     15,   // GeoEye-1
+      "Commercial imaging (1.5m)":     60,   // SPOT 6/7
+      "Commercial imaging (70cm)":     16,   // KOMPSAT-3
+      "Commercial imaging (55cm)":     16,   // KOMPSAT-3A
+      "Commercial imaging (0.8m)":     45,   // Gaofen-2
+      "SAR imaging (C-band)":          80,   // Sentinel-1 IW mode
+      "SAR imaging (X-band)":          30,   // TerraSAR-X stripmap
+      "SAR imaging (L-band)":          70,   // ALOS-2
+      "Multispectral imaging (10m)":  290,   // Sentinel-2
+      "Multispectral (30m)":          185,   // Landsat 8/9
+      "Chinese imaging (2m)":          60,   // Gaofen-1
+      "Chinese imaging (0.72m)":       11,   // Jilin-1
+      "Chinese imaging (0.5m)":        12,   // SuperView-1
+      "Russian imaging (2.5m)":        20,   // KANOPUS-V
+      "Russian imaging (1m)":          35,   // Resurs-P
+      "Russian reconnaissance":        15,
+      "Russian ELINT":                500,   // signals intelligence — very wide
+    };
+
+    function showSatelliteFootprint(feature, swathKm) {
+      if (state.satelliteFootprint) state.map.removeLayer(state.satelliteFootprint);
+      const [lon, lat] = feature.geometry.coordinates;
+      const radiusM = (swathKm || 50) * 500; // half-swath in metres
+      state.satelliteFootprint = L.circle([lat, lon], {
+        radius: radiusM,
+        color: "#195d85",
+        weight: 1.5,
+        dashArray: "6,4",
+        fillColor: "#195d85",
+        fillOpacity: 0.08,
+        interactive: false,
+      }).addTo(state.map);
+    }
+
     function initMap() {
       state.map = L.map("map", {
         zoomControl: true,
@@ -1766,7 +1808,10 @@
                 if (props.current_alt_km) details += `<br>Altitude: ${props.current_alt_km} km`;
                 if (props.norad_id) details += `<br>NORAD: ${props.norad_id}`;
                 if (props.next_pass) details += `<br>Next pass: <b>${new Date(props.next_pass).toUTCString().replace(" GMT","Z")}</b>`;
+                const swath = SAT_SWATH_KM[props.type] || null;
+                if (swath) details += `<br>Sensor swath: <b>~${swath} km</b>`;
                 if (!props.has_position) details += `<br><small style="color:#aaa">Position estimated</small>`;
+                layerRef.on("click", () => showSatelliteFootprint(feature, swath));
               } else if (props.next_pass) {
                 details += `<br>Next pass: ${props.next_pass}`;
               }
@@ -2116,7 +2161,7 @@
       label.querySelector("input").addEventListener("change", toggleOverlay);
       // Prevent info button click from toggling the checkbox
       const btn = label.querySelector(".overlay-info-btn");
-      if (btn) btn.addEventListener("click", (e) => e.preventDefault());
+      if (btn) btn.addEventListener("click", (e) => e.stopPropagation());
       return label;
     }
 
