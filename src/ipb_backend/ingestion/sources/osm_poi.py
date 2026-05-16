@@ -180,7 +180,7 @@ OVERPASS_URLS = [
 
 
 class OsmPoiAdapter(SourceAdapter):
-    REQUEST_TIMEOUT = httpx.Timeout(65.0, connect=10.0)
+    REQUEST_TIMEOUT = httpx.Timeout(45.0, connect=10.0)
 
     async def _query_batch(self, client: httpx.AsyncClient, query: str) -> list[dict[str, Any]]:
         last_exc: Exception | None = None
