@@ -82,7 +82,7 @@ class NationalLandSurveyAdapter(SourceAdapter):
                         "label": self.COLLECTIONS[coll_id],
                         "number_matched": number_matched,
                         "number_returned": len(features),
-                        "sample_features": features[:3],
+                        "features": features[:100],
                     }
                 except Exception as e:
                     collection_data[coll_id] = {

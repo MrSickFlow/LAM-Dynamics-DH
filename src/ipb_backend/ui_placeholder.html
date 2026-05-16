@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IPB Operations Workspace</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
       :root {
         --bg: #d7e0db;
@@ -323,76 +325,17 @@
         align-items: start;
       }
 
-      .map-view {
-        min-height: 420px;
+      #map {
+        height: 520px;
         border-radius: 20px;
         border: 1px solid rgba(20, 38, 29, 0.14);
-        background:
-          linear-gradient(180deg, rgba(246, 242, 233, 0.22), rgba(246, 242, 233, 0)),
-          radial-gradient(circle at 30% 34%, rgba(92, 137, 110, 0.22), transparent 18%),
-          radial-gradient(circle at 58% 58%, rgba(196, 108, 50, 0.24), transparent 12%),
-          linear-gradient(135deg, rgba(20, 38, 29, 0.08), rgba(25, 93, 133, 0.08));
-        position: relative;
-        overflow: hidden;
       }
 
-      .map-view::before,
-      .map-view::after {
-        content: "";
-        position: absolute;
-      }
-
-      .map-view::before {
-        inset: 6% 7%;
-        border: 1px dashed rgba(20, 38, 29, 0.22);
-        border-radius: 22px;
-      }
-
-      .map-view::after {
-        width: 220px;
-        height: 220px;
-        right: -30px;
-        bottom: -40px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(25, 93, 133, 0.2), transparent 70%);
-      }
-
-      .map-label {
-        position: absolute;
-        display: grid;
-        gap: 4px;
-        padding: 12px 14px;
-        border-radius: 16px;
-        background: rgba(246, 242, 233, 0.86);
-        border: 1px solid rgba(20, 38, 29, 0.16);
-        box-shadow: 0 10px 30px rgba(20, 38, 29, 0.12);
-      }
-
-      .map-label strong {
-        font-size: 0.95rem;
-      }
-
-      .map-label span,
       .window-heading span,
       .status-text,
       .timeline-row time {
         color: var(--muted);
         font-size: 0.82rem;
-      }
-
-      .label-area {
-        top: 16%;
-        left: 12%;
-      }
-
-      .label-weather {
-        top: 44%;
-        left: 52%;
-      }
-
-      .label-route {
-        bottom: 12%;
-        left: 28%;
       }
 
       .window-stack,
@@ -582,20 +525,7 @@
               </div>
 
               <div class="map-grid">
-                <div class="map-view" aria-label="Map home screen">
-                  <div class="map-label label-area">
-                    <strong id="map-area-label">North Karelia</strong>
-                    <span>Active area of operations</span>
-                  </div>
-                  <div class="map-label label-weather">
-                    <strong id="map-weather-label">Weather overlay</strong>
-                    <span>Awaiting FMI dataset</span>
-                  </div>
-                  <div class="map-label label-route">
-                    <strong>Route and terrain lanes</strong>
-                    <span>Future mobility overlay surface</span>
-                  </div>
-                </div>
+                <div id="map" aria-label="Map home screen"></div>
 
                 <div class="window-stack">
                   <section class="workspace-window active" data-window="home">
@@ -730,6 +660,9 @@
         ],
         weatherRecord: null,
         sources: [],
+        map: null,
+        mapDataLayer: null,
+        tileLayer: null,
       };
 
       const windowButtons = [...document.querySelectorAll("[data-window-trigger]")];
@@ -755,6 +688,7 @@
         event.preventDefault();
         state.area = areaInput.value.trim() || "North Karelia";
         state.timeframe = timeframeInput.value.trim() || "72h";
+        if (state.map) state.map.setView(getCenter(state.area), 9);
         loadWorkspace();
       });
 
@@ -775,8 +709,59 @@
         return value.replace(/([A-Z])/g, " $1").replace(/^./, (match) => match.toUpperCase());
       }
 
+      function getCenter(area) {
+        const a = area.toLowerCase();
+        if (a.includes("north karelia") || a === "joensuu") return [62.8, 30.2];
+        if (a.includes("lapland") || a.includes("kasivarren")) return [69.0, 21.5];
+        if (a.includes("archipelago") || a.includes("saaristomeri")) return [60.2, 22.0];
+        return [62.8, 30.2];
+      }
+
+      function initMap() {
+        const center = getCenter(state.area);
+        state.map = L.map("map", { zoomControl: true }).setView(center, 9);
+        state.tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: '&copy; <a href="https://openstreetmap.org/copyright">OSM</a>',
+          maxZoom: 18,
+        }).addTo(state.map);
+        state.mapDataLayer = L.geoJSON(null, {
+          style: (feature) => ({
+            color: feature.properties._collection === "tieviiva" ? "#c46c32"
+              : feature.properties._collection === "rakennus" ? "#195d85"
+              : feature.properties._collection === "jarvi" || feature.properties._collection === "meri" ? "#215347"
+              : "#5a6a61",
+            weight: feature.geometry?.type === "LineString" ? 2 : 1,
+            fillOpacity: 0.2,
+          }),
+          pointToLayer: (feature, latlng) => {
+            const color = feature.properties._collection === "paikannimi" ? "#c46c32" : "#195d85";
+            return L.circleMarker(latlng, { radius: 5, fillColor: color, color: "#fff", weight: 1, fillOpacity: 0.8 });
+          },
+          onEachFeature: (feature, layer) => {
+            const props = feature.properties || {};
+            const label = props._label || props._collection || "";
+            const name = props.nimi || props. nimi || props.namn || "";
+            layer.bindPopup(`<b>${label}</b>${name ? `<br>${name}` : ""}`);
+          },
+        }).addTo(state.map);
+      }
+
+      async function loadMapData() {
+        try {
+          const resp = await fetch(`/api/map-data/nls?area=${encodeURIComponent(state.area)}`);
+          const geojson = await resp.json();
+          if (state.mapDataLayer) {
+            state.mapDataLayer.clearLayers();
+            state.mapDataLayer.addData(geojson);
+          }
+        } catch (e) {
+          console.error("Map data load failed:", e);
+        }
+      }
+
       async function loadWorkspace() {
-        statusLine.textContent = "Loading UI state from existing API routes.";
+        statusLine.textContent = "Loading UI...";
+        if (!state.map) initMap();
 
         try {
           const [placeholderResponse, datasetsResponse, sourcesResponse] = await Promise.all([
@@ -799,11 +784,12 @@
           renderWeather();
           renderWidgetControls();
           renderDashboardVisibility();
+          loadMapData();
 
-          statusLine.textContent = "Workspace synced. Map shell is using existing placeholder and dataset endpoints.";
+          statusLine.textContent = "Workspace synced. Map shows ingested NLS data overlays.";
         } catch (error) {
           console.error(error);
-          statusLine.textContent = "UI shell loaded, but API data could not be refreshed. Existing layout remains usable.";
+          statusLine.textContent = "UI shell loaded, but API data could not be refreshed.";
         }
       }
 
@@ -925,7 +911,18 @@
         document.getElementById("weather-summary").textContent =
           (record && record.summary) || "Trigger ingestion for FMI data, then this card will show live normalized weather.";
         document.getElementById("weather-status-tag").textContent = record ? "Weather: live dataset present" : "Weather: pending";
-        document.getElementById("map-weather-label").textContent = record ? `Weather overlay: ${temp == null ? "--" : temp} C` : "Weather overlay";
+
+        if (state.map && station.latitude && station.longitude) {
+          const marker = L.circleMarker([station.latitude, station.longitude], {
+            radius: 10, fillColor: "#c46c32", color: "#fff", weight: 2, fillOpacity: 0.9,
+          }).addTo(state.map);
+          marker.bindPopup(`
+            <b>${station.name}</b><br>
+            Temp: ${temp ?? "--"} C<br>
+            Wind: ${wind ?? "--"} m/s<br>
+            Visibility: ${vis ?? "--"} m
+          `);
+        }
 
         const metrics = [
           ["Visibility", vis == null ? "--" : `${vis} m`],
