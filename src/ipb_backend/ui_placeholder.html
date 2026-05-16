@@ -534,6 +534,56 @@
       flex-shrink: 0;
     }
 
+    .overlay-info-btn {
+      margin-left: auto;
+      flex-shrink: 0;
+      width: 17px;
+      height: 17px;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.68rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: help;
+      position: relative;
+      transition: color 120ms, border-color 120ms;
+      user-select: none;
+    }
+
+    .overlay-info-btn:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .overlay-info-tooltip {
+      display: none;
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 6px);
+      width: 230px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 13px;
+      font-size: 0.78rem;
+      font-weight: 400;
+      line-height: 1.55;
+      color: var(--text);
+      z-index: 9999;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.13);
+      pointer-events: none;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .overlay-info-btn:hover .overlay-info-tooltip {
+      display: block;
+    }
+
     .map-watermark,
     .draw-hint {
       position: absolute;
@@ -1943,7 +1993,8 @@
           el.innerHTML = `
             <input type="checkbox" ${isOverlayVisible("weather") ? "checked" : ""} data-collection="weather" />
             <span class="overlay-swatch" style="background:#c46c32"></span>
-            <span>Current Weather (station)</span>
+            <span style="flex:1">Current Weather (station)</span>
+            <span class="overlay-info-btn" title="">i<span class="overlay-info-tooltip">${OVERLAY_INFO["weather"] || ""}</span></span>
           `;
           el.querySelector("input").addEventListener("change", toggleOverlay);
           body.appendChild(el);
@@ -1977,15 +2028,66 @@
       });
     }
 
+    const OVERLAY_INFO = {
+      // NLS — Terrain
+      korkeuskayra:           "Elevation contour lines at 2.5 m intervals from the NLS DEM. Use to identify ridges, valleys, slopes and dead ground.",
+      jarvi:                  "Standing water bodies (lakes, ponds) from the NLS topographic database. Key cross-country mobility obstacles and water resource locations.",
+      meri:                   "Sea and coastal water areas. Defines coastlines and archipelago passages.",
+      virtavesialue:          "Rivers and streams — linear water obstacles. Width and flow affect fordability for vehicles and dismounted troops.",
+      suo:                    "Bogs and wetlands. Typically impassable for wheeled vehicles in spring/autumn; may freeze solid in winter. Major factor in Finnish mobility planning.",
+      kallioalue:             "Exposed bedrock outcrops. Impassable for most vehicles; limits dismounted movement and digging. Common in eastern Finland.",
+      metsamaankasvillisuus:  "Forest land vegetation from NLS — shows wooded terrain extent. Coniferous forest dominates in this region. Critical for concealment, observation and cross-country movement planning.",
+      maatalousmaa:           "Agricultural and farmland areas. Open terrain with minimal cover; good visibility and fields of fire but limited concealment.",
+      // NLS — Infrastructure
+      rakennus:               "Building footprints from the NLS topographic database. Use for urban density analysis, shelter and cover assessment, and identifying potential strongpoints or obstacles.",
+      rautatie:               "Railway lines. Linear movement corridors for heavy logistics; bridges and level crossings are key terrain features. Disruption impacts strategic supply.",
+      sahkolinja:             "High-voltage transmission lines (NLS). Less complete than OSM power data — use Power Infrastructure overlay for fuller coverage.",
+      taajaanrakennettualue:  "Dense built-up urban areas. Complex terrain with restricted vehicle movement, multiple covered approaches and high civilian density.",
+      lentokenttaalue:        "Airport and airfield perimeters from NLS. Use together with the Airfields & Helipads POI layer.",
+      satamaalue:             "Port and harbour zones. Sea logistics nodes; potential landing or evacuation sites.",
+      rautatieliikennepaikka: "Railway stations and stops. Logistics transfer nodes; often co-located with road infrastructure.",
+      osoitepiste:            "Individual building address points. Useful for precise location referencing in urban environments.",
+      tieviiva:               "Road network from NLS. Note: coverage is limited compared to full OSM road data.",
+      // Weather
+      weather:                "Current conditions from the nearest FMI (Finnish Meteorological Institute) weather station: temperature, wind speed/direction, precipitation and visibility. Updated every observation cycle.",
+      // Cell & Satellites
+      celltowers:             "Mobile network mast locations from OpenCelliD. Indicates communications infrastructure coverage. Loss of towers degrades civilian and some military communications.",
+      satellites:             "Active satellites currently in observation geometry relevant to this area. Includes imagery and SAR satellites with estimated pass times.",
+      // Bridges & Tunnels
+      bridges:                "Bridges and underpasses from Digiroad with load data: max mass (t), axle load (t), height clearance (m) and width (m). Critical for route planning with heavy vehicles.",
+      tunnels:                "Road tunnels from Digiroad. Shown with dashed lines. Single points of failure for road corridors — high vulnerability to disruption.",
+      // Road surface
+      "road-surface":         "Real-time road weather stations from Fintraffic Digitraffic. Reports surface condition (dry/wet/icy/snowy), air temperature and road temperature. Updated every 10 minutes.",
+      // POI — Civilian
+      "poi-education":        "Schools, universities, colleges, kindergartens and libraries. Can serve as field headquarters, civilian assembly points or temporary medical stations due to size and facilities.",
+      "poi-healthcare":       "Hospitals, clinics, GP surgeries, dentists, pharmacies and veterinary clinics. Marks medical support infrastructure — critical for casualty treatment planning and civilian vulnerability assessment.",
+      "poi-water_sources":    "Drinking water points, water towers, wells, water works and natural springs. Essential for resupply planning in areas where mains water may be disrupted.",
+      "poi-religion":         "Churches, mosques, temples and other places of worship. Often large, structurally robust buildings used historically as field hospitals, shelters or command posts.",
+      "poi-emergency_services": "Police stations, fire stations and ambulance depots. Civil emergency response nodes — their status indicates local governance capability and civilian security.",
+      "poi-government":       "Town halls, courthouses, prisons, embassies and community centres. Administrative and civil authority nodes; often hardened or significant buildings.",
+      "poi-industry":         "Industrial, commercial and warehouse zones. Potential sources of vehicles, fuel, tools and construction materials; also possible staging or logistics areas.",
+      "poi-forest":           "Forest polygon areas from OSM, coloured by tree type: dark green = needleleaved (pine/spruce — dominant in Finland), medium green = broadleaved, mid green = mixed/untagged. Use for concealment, movement and observation planning.",
+      // POI — Military / Infrastructure
+      "poi-military":         "Designated military areas, installations and training grounds from OSM. May include barracks, ranges, depots and restricted areas.",
+      "poi-airfields":        "Civilian aerodromes, airstrips, helipads and heliports. Includes ICAO codes where available. Relevant for aviation support, CASEVAC and air logistics planning.",
+      "poi-fuel_supply":      "Petrol stations and fuel depots. Resupply planning for wheeled and tracked vehicles. Shows brand and opening hours where available.",
+      "poi-power_infrastructure": "Power line network (OSM) shown as lines — reveals actual grid routing and dependencies. Substation and generator locations shown as points. Far more complete than the NLS power lines layer.",
+    };
+
     function buildOverlayControl(item) {
+      const info = OVERLAY_INFO[item.id] || "";
       const label = document.createElement("label");
       label.className = "overlay-item";
       label.innerHTML = `
         <input type="checkbox" ${isOverlayVisible(item.id) ? "checked" : ""} data-collection="${item.id}" />
-        <span class="overlay-swatch" style="background:${item.color}"></span>
-        <span>${item.label}</span>
+        <span class="overlay-swatch" style="background:${item.color || "#888"}"></span>
+        <span style="flex:1">${item.label}</span>
+        ${info ? `<span class="overlay-info-btn" title="">i<span class="overlay-info-tooltip">${info}</span></span>` : ""}
       `;
       label.querySelector("input").addEventListener("change", toggleOverlay);
+      // Prevent info button click from toggling the checkbox
+      const btn = label.querySelector(".overlay-info-btn");
+      if (btn) btn.addEventListener("click", (e) => e.preventDefault());
       return label;
     }
 
