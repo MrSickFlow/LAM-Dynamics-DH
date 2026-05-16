@@ -802,7 +802,7 @@ def _nearby_context(lat: float, lon: float, records) -> dict[str, Any]:
 
 
 async def _build_point_snapshot(lat: float, lon: float, timeframe: str, services) -> dict[str, Any]:
-    from ipb_backend.terrain.elevation import build_elevation_provider
+    from ipb_backend.terrain.elevation import build_elevation_provider, compute_radial_los
 
     elevation_provider = build_elevation_provider(settings.nls_api_key)
     elevation_m = await elevation_provider.get_elevation(lat, lon)
@@ -822,10 +822,7 @@ async def _build_point_snapshot(lat: float, lon: float, timeframe: str, services
 
     nearby = _nearby_context(lat, lon, services["ingestion_service"].records)
 
-    los: dict[str, Any] = {
-        "available": False,
-        "note": "Line-of-sight analysis requires DEM profile sampling — not yet implemented",
-    }
+    los: dict[str, Any] = await compute_radial_los(lat, lon, settings.nls_api_key)
 
     parts: list[str] = []
     if elevation_m is not None:
@@ -840,6 +837,10 @@ async def _build_point_snapshot(lat: float, lon: float, timeframe: str, services
     poi_total = sum(nearby.get("poi_counts", {}).values())
     if poi_total:
         parts.append(f"{poi_total} nearby POIs")
+    if los.get("available"):
+        los_summary = los.get("summary", "")
+        if los_summary:
+            parts.append(f"LOS: {los_summary}")
     summary = f"Point ({lat:.4f}, {lon:.4f}): {', '.join(parts) if parts else 'no data available'}"
 
     return {

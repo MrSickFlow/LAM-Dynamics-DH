@@ -2395,10 +2395,9 @@
       const poiTotal = Object.values(poiCounts).reduce((a, b) => a + b, 0);
       if (poiTotal) rows.push({ label: "POIs (2 km)", value: String(poiTotal) });
 
-      const los = data.los || {};
-      rows.push({ label: "LOS analysis", value: los.available ? "Available" : "Unavailable", source: los.note || "" });
-
       content.innerHTML = "";
+
+      // metric cards grid
       const grid = document.createElement("div");
       grid.className = "metrics-grid";
       rows.forEach(({ label, value, source }) => {
@@ -2409,6 +2408,48 @@
         grid.appendChild(card);
       });
       content.appendChild(grid);
+
+      // LOS compass
+      const los = data.los || {};
+      const losHeading = document.createElement("div");
+      losHeading.style.cssText = "margin:14px 0 6px;font-weight:600;font-size:0.82rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em";
+      losHeading.textContent = los.available ? "Line of Sight (2 km radius)" : "Line of Sight";
+      content.appendChild(losHeading);
+
+      if (!los.available) {
+        const note = document.createElement("p");
+        note.style.cssText = "margin:0;font-size:0.82rem;color:var(--muted)";
+        note.textContent = los.note || "NLS API key required for LOS analysis";
+        content.appendChild(note);
+      } else {
+        // observer elevation
+        const obsLine = document.createElement("p");
+        obsLine.style.cssText = "margin:0 0 8px;font-size:0.82rem;color:var(--muted)";
+        obsLine.textContent = `Observer: ${los.observer_elevation_m} m + ${los.observer_height_m} m eye height`;
+        content.appendChild(obsLine);
+
+        // summary
+        if (los.summary) {
+          const sumLine = document.createElement("p");
+          sumLine.style.cssText = "margin:0 0 10px;font-size:0.82rem";
+          sumLine.textContent = los.summary;
+          content.appendChild(sumLine);
+        }
+
+        // 8-direction compass grid
+        const compass = document.createElement("div");
+        compass.style.cssText = "display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:4px";
+        (los.directions || []).forEach((d) => {
+          const badge = document.createElement("div");
+          const color = d.obstructed ? "#c46c32" : "#215347";
+          const range = d.obstructed ? `${d.obstruction_dist_m}m` : `${(d.clear_range_m / 1000).toFixed(1)}km`;
+          badge.style.cssText = `background:${color};color:#fff;border-radius:6px;padding:5px 4px;text-align:center;font-size:0.75rem;font-weight:600`;
+          badge.innerHTML = `<div>${d.direction}</div><div style="font-weight:400;font-size:0.7rem">${d.obstructed ? "blocked" : "clear"} ${range}</div>`;
+          badge.title = d.obstructed ? `Obstructed at ${d.obstruction_dist_m} m` : `Clear to ${d.clear_range_m} m`;
+          compass.appendChild(badge);
+        });
+        content.appendChild(compass);
+      }
 
       // expand the section
       section.style.display = "";
