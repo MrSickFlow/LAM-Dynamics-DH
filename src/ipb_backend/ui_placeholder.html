@@ -92,6 +92,7 @@
 
     /* Overlay checkboxes */
     .overlay-list { display: flex; flex-direction: column; gap: 6px; }
+    .overlay-scroll { max-height: 280px; overflow-y: auto; }
     .overlay-item {
       display: flex; align-items: center; gap: 10px; padding: 8px 10px;
       border-radius: 12px; border: 1px solid var(--line); cursor: pointer;
@@ -177,7 +178,7 @@
       <!-- Overlay Settings -->
       <div class="section">
         <div class="section-header">Overlay Settings</div>
-        <div class="section-body">
+        <div class="section-body overlay-scroll">
           <div class="overlay-list" id="overlay-controls"></div>
         </div>
       </div>
@@ -265,21 +266,55 @@
         const geojson = await resp.json();
         state.mapDataLayer.clearLayers();
         state.mapDataLayer.addData(geojson);
+        renderOverlays();
+        statusLine.textContent = `Synced. ${geojson.features.length} features on map.`;
       } catch (e) { console.error("Map data load failed:", e); }
     }
 
     function renderOverlays() {
       overlayControls.innerHTML = "";
-      state.layers.forEach((layer) => {
-        const colors = { terrain: "#5a6a61", infrastructure: "#c46c32", demographics: "#195d85", weather: "#215347" };
-        const el = document.createElement("label");
-        el.className = "overlay-item";
-        el.innerHTML = `
-          <input type="checkbox" checked />
-          <span class="overlay-swatch" style="background:${colors[layer.category] || '#888'}"></span>
-          <span>${layer.title}</span>
-        `;
-        overlayControls.appendChild(el);
+      const collColors = {
+        tieviiva: "#c46c32", rakennus: "#195d85", jarvi: "#215347", meri: "#215347",
+        virtavesialue: "#215347", korkeuskayra: "#5a6a61", suo: "#5a6a61",
+        kallioalue: "#5a6a61", metsamaankasvillisuus: "#2a8a5c", maatalousmaa: "#c4a832",
+        taajaanrakennettualue: "#195d85", rautatie: "#c46c32", sahkolinja: "#c46c32",
+        paikannimi: "#c46c32", kunta: "#195d85", kunnanhallintoraja: "#195d85",
+        luonnonsuojelualue: "#2a8a5c", lentokenttaalue: "#888", satamaalue: "#215347",
+        rautatieliikennepaikka: "#c46c32", osoitepiste: "#888",
+      };
+      const used = new Set();
+      if (state.mapDataLayer) {
+        state.mapDataLayer.eachLayer((layer) => {
+          const coll = layer.feature?.properties?._collection;
+          const label = layer.feature?.properties?._label || coll;
+          if (coll && !used.has(coll)) {
+            used.add(coll);
+            const el = document.createElement("label");
+            el.className = "overlay-item";
+            el.dataset.collection = coll;
+            el.innerHTML = `
+              <input type="checkbox" checked data-collection="${coll}" />
+              <span class="overlay-swatch" style="background:${collColors[coll] || '#888'}"></span>
+              <span>${label}</span>
+            `;
+            el.querySelector("input").addEventListener("change", toggleOverlay);
+            overlayControls.appendChild(el);
+          }
+        });
+      }
+    }
+
+    function toggleOverlay(e) {
+      const coll = e.target.dataset.collection;
+      if (!state.mapDataLayer || !coll) return;
+      state.mapDataLayer.eachLayer((layer) => {
+        if (layer.feature?.properties?._collection === coll) {
+          if (e.target.checked) {
+            if (!state.map.hasLayer(layer)) layer.addTo(state.map);
+          } else {
+            if (state.map.hasLayer(layer)) state.map.removeLayer(layer);
+          }
+        }
       });
     }
 
@@ -352,11 +387,9 @@
         const datasets = await datasetsResp.json();
         state.weatherRecord = [...datasets].reverse().find((r) => r.category === "weather") || null;
 
-        renderOverlays();
         renderSources();
         renderWeather();
         loadMapData();
-        statusLine.textContent = `Synced. ${(await (await fetch(`/api/map-data/nls?area=${encodeURIComponent(state.area)}`)).json()).features.length} features on map.`;
       } catch (e) {
         console.error(e);
         statusLine.textContent = "Could not load workspace data.";
