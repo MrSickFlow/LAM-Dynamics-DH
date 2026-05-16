@@ -91,17 +91,35 @@
     .btn-primary:disabled { opacity: 0.5; cursor: wait; }
 
     /* Overlay checkboxes */
-    .overlay-list { display: flex; flex-direction: column; gap: 6px; }
-    .overlay-scroll { max-height: 280px; overflow-y: auto; }
-    .overlay-item {
-      display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-      border-radius: 12px; border: 1px solid var(--line); cursor: pointer;
-      transition: background 140ms; font-size: 0.88rem;
+    .overlay-list { display: flex; flex-direction: column; gap: 0; }
+    .overlay-scroll { max-height: 340px; overflow-y: auto; }
+
+    .overlay-category { border-bottom: 1px solid var(--line); }
+    .overlay-category:last-child { border-bottom: none; }
+
+    .overlay-category-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 4px; cursor: pointer; font-size: 0.75rem;
+      font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--muted); user-select: none;
     }
-    .overlay-item:hover { background: rgba(33,83,71,0.05); }
-    .overlay-item input { accent-color: var(--accent); width: 16px; height: 16px; }
+    .overlay-category-header:hover { color: var(--ink); }
+    .overlay-category-header .collapse-icon {
+      transition: transform 180ms; font-size: 0.7rem; line-height: 1;
+    }
+    .overlay-category-header.collapsed .collapse-icon { transform: rotate(-90deg); }
+    .overlay-category-body { display: flex; flex-direction: column; gap: 4px; padding: 0 0 4px; }
+    .overlay-category-header.collapsed + .overlay-category-body { display: none; }
+
+    .overlay-item {
+      display: flex; align-items: center; gap: 10px; padding: 6px 8px;
+      border-radius: 10px; cursor: pointer;
+      transition: background 140ms; font-size: 0.82rem;
+    }
+    .overlay-item:hover { background: rgba(33,83,71,0.06); }
+    .overlay-item input { accent-color: var(--accent); width: 14px; height: 14px; }
     .overlay-swatch {
-      width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0;
+      width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0;
     }
 
     /* Weather card */
@@ -214,6 +232,7 @@
       area: "North Karelia", timeframe: "72h",
       map: null, collectionLayers: {}, layers: [],
       sources: [], weatherRecord: null,
+      weatherMarker: null,
     };
 
     const form = document.getElementById("scenario-form");
@@ -234,7 +253,7 @@
 
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
-      rakennus: { color: "#195d85", weight: 1, fillOpacity: 0.2 },
+      rakennus: { color: "#195d85", weight: 1.5, fillOpacity: 0.45 },
       jarvi: { color: "#215347", weight: 1, fillOpacity: 0.15 },
       meri: { color: "#215347", weight: 1, fillOpacity: 0.15 },
       virtavesialue: { color: "#215347", weight: 1.5, fill: false },
@@ -243,7 +262,7 @@
       kallioalue: { color: "#5a6a61", weight: 1, fillOpacity: 0.1 },
       metsamaankasvillisuus: { color: "#2a8a5c", weight: 1, fillOpacity: 0.15 },
       maatalousmaa: { color: "#c4a832", weight: 1, fillOpacity: 0.15 },
-      taajaanrakennettualue: { color: "#195d85", weight: 1, fillOpacity: 0.2 },
+      taajaanrakennettualue: { color: "#195d85", weight: 1.5, fillOpacity: 0.4 },
       rautatie: { color: "#c46c32", weight: 1.5, fill: false },
       sahkolinja: { color: "#c46c32", weight: 1, fill: false, dashArray: "6,4" },
       paikannimi: { point: true, color: "#c46c32" },
@@ -334,24 +353,95 @@
       { id: "osoitepiste", label: "Address points", color: "#888" },
     ];
 
+    const OVERLAY_CATEGORIES = [
+      {
+        name: "Topographical",
+        ids: ["korkeuskayra", "jarvi", "meri", "virtavesialue", "suo", "kallioalue", "metsamaankasvillisuus", "maatalousmaa"],
+      },
+      {
+        name: "Infrastructure",
+        ids: ["tieviiva", "rakennus", "rautatie", "sahkolinja", "taajaanrakennettualue", "lentokenttaalue", "satamaalue", "rautatieliikennepaikka", "osoitepiste"],
+      },
+      {
+        name: "Boundaries & Places",
+        ids: ["kunta", "kunnanhallintoraja", "luonnonsuojelualue", "paikannimi"],
+      },
+      {
+        name: "Weather",
+        ids: [],
+        weatherToggle: true,
+      },
+    ];
+
+    const collMap = {};
+    NLS_COLLECTIONS.forEach((c) => { collMap[c.id] = c; });
+
+    function toggleCategory(header) {
+      header.classList.toggle("collapsed");
+    }
+
     function renderOverlays() {
       overlayControls.innerHTML = "";
-      NLS_COLLECTIONS.forEach((coll) => {
-        const el = document.createElement("label");
-        el.className = "overlay-item";
-        el.innerHTML = `
-          <input type="checkbox" checked data-collection="${coll.id}" />
-          <span class="overlay-swatch" style="background:${coll.color}"></span>
-          <span>${coll.label}</span>
-        `;
-        el.querySelector("input").addEventListener("change", toggleOverlay);
-        overlayControls.appendChild(el);
+      const allOpen = localStorage.getItem("overlay_cats") === "all";
+
+      OVERLAY_CATEGORIES.forEach((cat, idx) => {
+        const wrap = document.createElement("div");
+        wrap.className = "overlay-category";
+
+        const header = document.createElement("div");
+        header.className = "overlay-category-header";
+        header.innerHTML = `<span>${cat.name}</span><span class="collapse-icon">▾</span>`;
+        header.addEventListener("click", () => toggleCategory(header));
+        wrap.appendChild(header);
+
+        const body = document.createElement("div");
+        body.className = "overlay-category-body";
+        // First category open by default, rest collapsed
+        if (idx !== 0) header.classList.add("collapsed");
+
+        if (cat.weatherToggle) {
+          const el = document.createElement("label");
+          el.className = "overlay-item";
+          el.innerHTML = `
+            <input type="checkbox" checked data-collection="weather" />
+            <span class="overlay-swatch" style="background:#c46c32"></span>
+            <span>Current Weather (station)</span>
+          `;
+          el.querySelector("input").addEventListener("change", toggleOverlay);
+          body.appendChild(el);
+        }
+
+        cat.ids.forEach((id) => {
+          const coll = collMap[id];
+          if (!coll) return;
+          const el = document.createElement("label");
+          el.className = "overlay-item";
+          el.innerHTML = `
+            <input type="checkbox" checked data-collection="${coll.id}" />
+            <span class="overlay-swatch" style="background:${coll.color}"></span>
+            <span>${coll.label}</span>
+          `;
+          el.querySelector("input").addEventListener("change", toggleOverlay);
+          body.appendChild(el);
+        });
+
+        wrap.appendChild(body);
+        overlayControls.appendChild(wrap);
       });
     }
 
     function toggleOverlay(e) {
-      const coll = e.target.dataset.collection;
-      const layer = state.collectionLayers?.[coll];
+      const id = e.target.dataset.collection;
+      if (id === "weather") {
+        if (!state.weatherMarker) return;
+        if (e.target.checked) {
+          state.weatherMarker.addTo(state.map);
+        } else {
+          state.map.removeLayer(state.weatherMarker);
+        }
+        return;
+      }
+      const layer = state.collectionLayers?.[id];
       if (!layer) return;
       if (e.target.checked) {
         layer.addTo(state.map);
@@ -391,12 +481,19 @@
       document.getElementById("w-cloud").textContent = c == null ? "--" : `${c}/8`;
       document.getElementById("w-station").textContent = station.name || "No weather data loaded";
 
+      // Create or update weather marker
+      if (state.weatherMarker) state.map.removeLayer(state.weatherMarker);
+      state.weatherMarker = null;
+
       if (state.map && station.latitude && station.longitude) {
-        L.circleMarker([station.latitude, station.longitude], {
+        state.weatherMarker = L.circleMarker([station.latitude, station.longitude], {
           radius: 10, fillColor: "#c46c32", color: "#fff", weight: 2, fillOpacity: 0.9,
-        }).addTo(state.map).bindPopup(`
+        }).bindPopup(`
           <b>${station.name}</b><br>Temp: ${t ?? "--"}°C<br>Wind: ${w ?? "--"} m/s<br>Vis: ${v ?? "--"} m
         `);
+        // Only add to map if the weather overlay toggle is checked
+        const cb = document.querySelector('input[data-collection="weather"]');
+        if (!cb || cb.checked) state.weatherMarker.addTo(state.map);
       }
     }
 
