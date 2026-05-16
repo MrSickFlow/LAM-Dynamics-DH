@@ -35,7 +35,6 @@ from ipb_backend.models import (
     UiLayer,
     UiPlaceholderResponse,
 )
-from ipb_backend.ingestion.sources.osm_poi import _load_static_pois as _load_static_osm_pois
 from ipb_backend.spatial import clip_geojson_feature, geojson_to_shape, polygon_area_sqkm
 
 router = APIRouter()
@@ -66,6 +65,18 @@ def _latest_records_by_source(records):
         if current is None or record.retrieved_at > current.retrieved_at:
             latest[record.source_id] = record
     return latest
+
+
+def _record_for_area_or_latest(records, source_id: str, area: Optional[str] = None):
+    matching = [record for record in records if record.source_id == source_id]
+    if not matching:
+        return None
+    if area:
+        for record in reversed(matching):
+            if record.area == area:
+                return record
+        return None
+    return max(matching, key=lambda record: record.retrieved_at)
 
 
 def _collection_summary(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -367,6 +378,12 @@ async def list_datasets(services=Depends(get_services)):
     return services["ingestion_service"].records
 
 
+@router.get("/weather/current")
+async def current_weather(area: str = Query("North Karelia"), services=Depends(get_services)):
+    record = _record_for_area_or_latest(services["ingestion_service"].records, "fmi", area)
+    return {"record": record}
+
+
 @router.get("/ui-placeholder", response_model=UiPlaceholderResponse)
 async def ui_placeholder(area: str, timeframe: str):
     return UiPlaceholderResponse(
@@ -438,7 +455,7 @@ async def map_layers():
 @router.get("/map-data/nls")
 async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
-    nls_record = next((r for r in records if r.source_id == "nls" and r.area == area), None)
+    nls_record = _record_for_area_or_latest(records, "nls", area)
     if nls_record is None:
         return {"type": "FeatureCollection", "features": [], "available": False, "reason": "missing"}
 
@@ -469,7 +486,7 @@ async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_
 @router.get("/map-data/digiroad")
 async def map_data_digiroad(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
-    record = next((r for r in records if r.source_id == "digiroad" and r.area == area), None)
+    record = _record_for_area_or_latest(records, "digiroad", area)
     if record is None:
         return {"type": "FeatureCollection", "features": [], "available": False}
     bridge_coll_id = "dr_tielinkki_silta_alikulku_tunneli"
@@ -496,7 +513,7 @@ async def map_data_digiroad(area: str = Query("North Karelia"), services=Depends
 @router.get("/map-data/opencellid")
 async def map_data_opencellid(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
-    record = next((r for r in records if r.source_id == "opencellid" and r.area == area), None)
+    record = _record_for_area_or_latest(records, "opencellid", area)
     if record is None:
         return {"type": "FeatureCollection", "features": [], "available": False}
     cells = record.data.get("cells", [])
@@ -527,14 +544,8 @@ async def map_data_opencellid(area: str = Query("North Karelia"), services=Depen
 @router.get("/map-data/osm-poi")
 async def map_data_osm_poi(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
-    record = next((r for r in records if r.source_id == "osm-poi" and r.area == area), None)
-    categories = None
-    if record is not None:
-        categories = record.data.get("categories", {})
-    else:
-        static = _load_static_osm_pois(area)
-        if static:
-            categories = static
+    record = _record_for_area_or_latest(records, "osm-poi", area)
+    categories = record.data.get("categories", {}) if record is not None else None
     if not categories:
         return {"type": "FeatureCollection", "features": [], "available": False}
     features = []
@@ -562,7 +573,7 @@ async def map_data_osm_poi(area: str = Query("North Karelia"), services=Depends(
 @router.get("/map-data/satellites")
 async def map_data_satellites(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
-    record = next((r for r in records if r.source_id == "satellites" and r.area == area), None)
+    record = _record_for_area_or_latest(records, "satellites", area)
     if record is None:
         return {"type": "FeatureCollection", "features": [], "available": False}
     satellites = record.data.get("satellites", {})

@@ -9,7 +9,8 @@ import httpx
 
 from ipb_backend.config import settings
 from ipb_backend.ingestion.base import SourceAdapter
-from ipb_backend.models import DatasetRecord
+from ipb_backend.models import DatasetRecord, LoadTarget
+from ipb_backend.spatial import format_bbox, resolve_load_target_bbox, resolve_load_target_label
 
 
 class NationalLandSurveyAdapter(SourceAdapter):
@@ -68,9 +69,10 @@ class NationalLandSurveyAdapter(SourceAdapter):
         normalized = self._normalize_area(area)
         return self.AREA_BBOXES.get(normalized, self.AREA_BBOXES["north karelia"])
 
-    async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
-        bbox = self._resolve_bbox(area)
-        bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+    async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
+        bbox = resolve_load_target_bbox(area, load_target)
+        area_label = resolve_load_target_label(area, load_target)
+        bbox_str = format_bbox(bbox)
 
         if not settings.nls_api_key:
             collection_data = self._build_demo_collections(bbox)
@@ -78,15 +80,16 @@ class NationalLandSurveyAdapter(SourceAdapter):
             return DatasetRecord(
                 source_id=self.definition.source_id,
                 category=self.definition.category,
-                area=area,
+                area=area_label,
                 timeframe=timeframe,
-                summary=self._build_summary(area, collection_data, total_features),
+                load_target=load_target,
+                summary=self._build_summary(area_label, collection_data, total_features),
                 data={
                     "provider": "National Land Survey of Finland (demo scaffold)",
                     "api": "Topographic Database OGC API Features",
                     "license": "CC 4.0 (NLS open data)",
                     "query": {
-                        "area": area,
+                        "area": area_label,
                         "bbox_wgs84": bbox_str,
                     },
                     "collections": collection_data,
@@ -134,15 +137,16 @@ class NationalLandSurveyAdapter(SourceAdapter):
         return DatasetRecord(
             source_id=self.definition.source_id,
             category=self.definition.category,
-            area=area,
+            area=area_label,
             timeframe=timeframe,
-            summary=self._build_summary(area, collection_data, total_features),
+            load_target=load_target,
+            summary=self._build_summary(area_label, collection_data, total_features),
             data={
                 "provider": "National Land Survey of Finland (Maanmittauslaitos)",
                 "api": "Topographic Database OGC API Features",
                 "license": "CC 4.0 (NLS open data)",
                 "query": {
-                    "area": area,
+                    "area": area_label,
                     "bbox_wgs84": bbox_str,
                 },
                 "collections": collection_data,

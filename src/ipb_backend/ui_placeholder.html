@@ -709,8 +709,8 @@
 
       <aside class="settings-panel" id="settings-panel">
         <div class="panel-card">
-          <div class="panel-title">Selection Mode</div>
-          <p class="panel-copy">Shift + left-click and hold on the map to draw an area of interest. The right-hand inspector updates from that polygon.</p>
+          <div class="panel-title">Data Load Area</div>
+          <p class="panel-copy">Choose a named area, use the current map view, or draw a rectangle first. The workspace loads datasets for that region, then Shift + drag draws the AOI inspection polygon.</p>
           <div class="control-row">
             <select id="area-select" class="area-select">
               <option value="North Karelia">North Karelia</option>
@@ -719,8 +719,16 @@
             </select>
           </div>
           <div class="control-row">
+            <button class="btn btn-secondary" id="use-preset-btn" type="button">Use Preset</button>
+            <button class="btn btn-secondary" id="use-view-btn" type="button">Use Map View</button>
+          </div>
+          <div class="control-row">
+            <button class="btn btn-secondary" id="draw-load-area-btn" type="button">Draw Load Rectangle</button>
+          </div>
+          <p class="panel-copy" id="load-target-label">Current load area: North Karelia (named area)</p>
+          <div class="control-row">
             <input id="timeframe-input" name="timeframe" value="72h" placeholder="Timeframe" />
-            <button class="btn btn-primary" id="refresh-btn" type="button">Refresh Data</button>
+            <button class="btn btn-primary" id="refresh-btn" type="button">Load Data</button>
           </div>
           <button class="btn btn-secondary" id="clear-selection-btn" type="button">Clear AOI Selection</button>
         </div>
@@ -832,20 +840,30 @@
   <script>
     const state = {
       bootstrapArea: "North Karelia",
+      workspaceArea: "North Karelia",
       timeframe: "72h",
       map: null,
       collectionLayers: {},
+      overlayVisibility: {},
       sources: [],
+      loadTarget: { kind: "named_area", label: "North Karelia" },
+      loadTargetLayer: null,
       weatherRecord: null,
       weatherMarker: null,
-    pointMarker: null,
-    weatherPickerActive: false,
-    pointWeatherData: null,
+      pointMarker: null,
+      weatherPickerActive: false,
+      pointWeatherData: null,
       selectionLayer: null,
       selectionGeometry: null,
       latestInspection: null,
       analysisHealth: null,
       dataCache: {},
+      loadSelection: {
+        enabled: false,
+        dragging: false,
+        start: null,
+        preview: null,
+      },
       draw: {
         active: false,
         points: [],
@@ -856,6 +874,10 @@
 
     const timeframeInput = document.getElementById("timeframe-input");
     const areaSelect = document.getElementById("area-select");
+    const usePresetBtn = document.getElementById("use-preset-btn");
+    const useViewBtn = document.getElementById("use-view-btn");
+    const drawLoadAreaBtn = document.getElementById("draw-load-area-btn");
+    const loadTargetLabel = document.getElementById("load-target-label");
     const refreshBtn = document.getElementById("refresh-btn");
     const clearSelectionBtn = document.getElementById("clear-selection-btn");
     const overlayControls = document.getElementById("overlay-controls");
@@ -958,7 +980,8 @@
       },
     ];
 
-    const WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites"];
+    const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites"];
+  const CUSTOM_LOAD_SOURCE_IDS = ["nls", "statistics-finland", "digiroad", "osm-poi"];
     const DEFAULT_VISIBLE_COLLECTIONS = new Set(["tieviiva", "rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges"]);
 
     const COLL_STYLE = {
@@ -1015,6 +1038,77 @@
       }, { passive: false });
     }
 
+    function getWorkspaceArea() {
+      return state.workspaceArea || state.bootstrapArea;
+    }
+
+    function currentSourceIds() {
+      return state.loadTarget?.kind === "named_area" ? FULL_WORKSPACE_SOURCE_IDS : CUSTOM_LOAD_SOURCE_IDS;
+    }
+
+    function isOverlayVisible(id) {
+      if (!(id in state.overlayVisibility)) {
+        state.overlayVisibility[id] = DEFAULT_VISIBLE_COLLECTIONS.has(id);
+      }
+      return !!state.overlayVisibility[id];
+    }
+
+    function setOverlayVisibility(id, visible) {
+      state.overlayVisibility[id] = visible;
+    }
+
+    function syncLoadTargetLabel() {
+      const label = state.loadTarget?.label || state.bootstrapArea;
+      const suffix = state.loadTarget?.kind === "named_area" ? "named area" : "custom bbox";
+      loadTargetLabel.textContent = `Current load area: ${label} (${suffix})`;
+    }
+
+    function clearLoadTargetLayer() {
+      if (state.map && state.loadTargetLayer) {
+        state.map.removeLayer(state.loadTargetLayer);
+      }
+      state.loadTargetLayer = null;
+    }
+
+    function renderLoadTargetBounds(bbox) {
+      if (!state.map) return;
+      clearLoadTargetLayer();
+      const [minLon, minLat, maxLon, maxLat] = bbox;
+      state.loadTargetLayer = L.rectangle([[minLat, minLon], [maxLat, maxLon]], {
+        color: "#195d85",
+        weight: 2,
+        dashArray: "8,4",
+        fillColor: "#195d85",
+        fillOpacity: 0.05,
+        interactive: false,
+      }).addTo(state.map);
+    }
+
+    function setNamedAreaLoadTarget(area) {
+      state.bootstrapArea = area;
+      state.workspaceArea = area;
+      state.loadTarget = { kind: "named_area", label: area };
+      clearLoadTargetLayer();
+      syncLoadTargetLabel();
+      if (state.map) state.map.setView(getCenter(area), 9);
+    }
+
+    function setCustomLoadTarget(bbox, label = "Custom Load Area") {
+      state.workspaceArea = label;
+      state.loadTarget = {
+        kind: "bbox",
+        label,
+        bbox_wgs84: bbox,
+      };
+      renderLoadTargetBounds(bbox);
+      syncLoadTargetLabel();
+    }
+
+    function currentMapBbox() {
+      const bounds = state.map.getBounds();
+      return [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+    }
+
     function initMap() {
       state.map = L.map("map", {
         zoomControl: true,
@@ -1052,11 +1146,17 @@
       wirePanelScrolling(settingsPanel);
 
       initFreehandSelection();
+      syncLoadTargetLabel();
     }
 
     function initFreehandSelection() {
       state.map.on("mousedown", (event) => {
         const original = event.originalEvent;
+        if (state.loadSelection.enabled && original.button === 0 && !original.shiftKey) {
+          original.preventDefault();
+          startLoadRectangle(event.latlng);
+          return;
+        }
         if (!original.shiftKey || original.button !== 0) return;
 
         original.preventDefault();
@@ -1064,13 +1164,87 @@
       });
 
       state.map.on("mousemove", (event) => {
+        if (state.loadSelection.dragging) {
+          updateLoadRectangle(event.latlng);
+          return;
+        }
         if (!state.draw.active) return;
         appendDrawPoint(event.latlng);
       });
 
       document.addEventListener("mouseup", () => {
+        if (state.loadSelection.dragging) {
+          finishLoadRectangle();
+          return;
+        }
         if (state.draw.active) finishDrawing();
       });
+    }
+
+    function beginLoadRectangleMode() {
+      state.loadSelection.enabled = true;
+      drawLoadAreaBtn.textContent = "Drawing Rectangle...";
+      state.map.getContainer().style.cursor = "crosshair";
+      statusLine.textContent = "Drag on the map to define the data load rectangle.";
+    }
+
+    function endLoadRectangleMode() {
+      state.loadSelection.enabled = false;
+      state.loadSelection.dragging = false;
+      state.loadSelection.start = null;
+      if (state.loadSelection.preview) {
+        state.map.removeLayer(state.loadSelection.preview);
+        state.loadSelection.preview = null;
+      }
+      drawLoadAreaBtn.textContent = "Draw Load Rectangle";
+      if (!state.weatherPickerActive) {
+        state.map.getContainer().style.cursor = "";
+      }
+      document.body.classList.remove("is-drawing");
+      state.map.dragging.enable();
+    }
+
+    function startLoadRectangle(latlng) {
+      state.loadSelection.dragging = true;
+      state.loadSelection.start = latlng;
+      state.map.dragging.disable();
+      document.body.classList.add("is-drawing");
+      if (state.loadSelection.preview) {
+        state.map.removeLayer(state.loadSelection.preview);
+      }
+      state.loadSelection.preview = L.rectangle([[latlng.lat, latlng.lng], [latlng.lat, latlng.lng]], {
+        color: "#195d85",
+        weight: 2,
+        fillColor: "#195d85",
+        fillOpacity: 0.12,
+        interactive: false,
+      }).addTo(state.map);
+    }
+
+    function updateLoadRectangle(latlng) {
+      if (!state.loadSelection.preview || !state.loadSelection.start) return;
+      state.loadSelection.preview.setBounds(L.latLngBounds(state.loadSelection.start, latlng));
+    }
+
+    function finishLoadRectangle() {
+      const preview = state.loadSelection.preview;
+      if (!preview) {
+        endLoadRectangleMode();
+        return;
+      }
+
+      const bounds = preview.getBounds();
+      const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+      endLoadRectangleMode();
+
+      if (Math.abs(bbox[2] - bbox[0]) < 0.01 || Math.abs(bbox[3] - bbox[1]) < 0.01) {
+        statusLine.textContent = "Load area ignored. Draw a larger rectangle.";
+        return;
+      }
+
+      setCustomLoadTarget(bbox);
+      clearSelection();
+      statusLine.textContent = "Custom load area selected. Click Load Data to fetch datasets for that rectangle.";
     }
 
     function startDrawing(latlng) {
@@ -1200,7 +1374,7 @@
           const el = document.createElement("label");
           el.className = "overlay-item";
           el.innerHTML = `
-            <input type="checkbox" ${DEFAULT_VISIBLE_COLLECTIONS.has("weather") ? "checked" : ""} data-collection="weather" />
+            <input type="checkbox" ${isOverlayVisible("weather") ? "checked" : ""} data-collection="weather" />
             <span class="overlay-swatch" style="background:#c46c32"></span>
             <span>Current Weather (station)</span>
           `;
@@ -1240,7 +1414,7 @@
       const label = document.createElement("label");
       label.className = "overlay-item";
       label.innerHTML = `
-        <input type="checkbox" ${DEFAULT_VISIBLE_COLLECTIONS.has(item.id) ? "checked" : ""} data-collection="${item.id}" />
+        <input type="checkbox" ${isOverlayVisible(item.id) ? "checked" : ""} data-collection="${item.id}" />
         <span class="overlay-swatch" style="background:${item.color}"></span>
         <span>${item.label}</span>
       `;
@@ -1250,6 +1424,7 @@
 
     function toggleOverlay(event) {
       const id = event.target.dataset.collection;
+      setOverlayVisibility(id, event.target.checked);
       if (id === "weather") {
         if (!state.weatherMarker) return;
         if (event.target.checked) {
@@ -1275,7 +1450,7 @@
         if (!checkbox) return;
         checkbox.disabled = !available;
         checkbox.title = available ? "" : message;
-        if (!available) checkbox.checked = false;
+        checkbox.checked = isOverlayVisible(id);
         if (!available && state.collectionLayers[id]) {
           state.map.removeLayer(state.collectionLayers[id]);
         }
@@ -1288,7 +1463,7 @@
 
     async function loadMapData() {
       try {
-        const response = await fetch(`/api/map-data/nls?area=${encodeURIComponent(state.bootstrapArea)}`);
+        const response = await fetch(`/api/map-data/nls?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
         Object.values(state.collectionLayers).forEach((layer) => layer.clearLayers());
 
@@ -1328,7 +1503,7 @@
 
     async function loadPoiMapData() {
       try {
-        const response = await fetch(`/api/map-data/osm-poi?area=${encodeURIComponent(state.bootstrapArea)}`);
+        const response = await fetch(`/api/map-data/osm-poi?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
         POI_COLLECTIONS.forEach((c) => state.collectionLayers[c.id]?.clearLayers());
         if (geojson.available === false) {
@@ -1358,7 +1533,7 @@
 
     async function loadCellTowerMapData() {
       try {
-        const response = await fetch(`/api/map-data/opencellid?area=${encodeURIComponent(state.bootstrapArea)}`);
+        const response = await fetch(`/api/map-data/opencellid?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
         state.collectionLayers["celltowers"]?.clearLayers();
         if (geojson.available === false) {
@@ -1377,7 +1552,7 @@
 
     async function loadSatelliteMapData() {
       try {
-        const response = await fetch(`/api/map-data/satellites?area=${encodeURIComponent(state.bootstrapArea)}`);
+        const response = await fetch(`/api/map-data/satellites?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
         state.collectionLayers["satellites"]?.clearLayers();
         if (geojson.available === false) {
@@ -1396,7 +1571,7 @@
 
     async function loadBridgeMapData() {
       try {
-        const response = await fetch(`/api/map-data/digiroad?area=${encodeURIComponent(state.bootstrapArea)}`);
+        const response = await fetch(`/api/map-data/digiroad?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
         state.collectionLayers["bridges"]?.clearLayers();
         if (geojson.available === false) {
@@ -1814,27 +1989,32 @@
 
     async function bootstrapWorkspace() {
       if (!state.map) initMap();
+      state.workspaceArea = state.loadTarget?.label || state.bootstrapArea;
       state.pointWeatherData = null;
       state.weatherPickerActive = false;
       if (state.pointMarker) { state.map.removeLayer(state.pointMarker); state.pointMarker = null; }
       state.timeframe = timeframeInput.value.trim() || "72h";
 
       refreshBtn.disabled = true;
-      refreshBtn.textContent = "Refreshing...";
-      statusLine.textContent = "Refreshing source datasets for the current workspace...";
+      refreshBtn.textContent = "Loading...";
+      statusLine.textContent = "Loading source datasets for the selected area...";
       const weatherPickerToggle = document.querySelector('input[data-action="weather-picker"]');
       if (weatherPickerToggle) weatherPickerToggle.checked = false;
       state.map.getContainer().style.cursor = "";
 
       try {
+        const payload = {
+          area: state.workspaceArea,
+          timeframe: state.timeframe,
+          source_ids: currentSourceIds(),
+        };
+        if (state.loadTarget?.kind !== "named_area") {
+          payload.load_target = state.loadTarget;
+        }
         const ingestResponse = await fetch("/api/ingest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            area: state.bootstrapArea,
-            timeframe: state.timeframe,
-            source_ids: WORKSPACE_SOURCE_IDS,
-          }),
+          body: JSON.stringify(payload),
         });
         if (!ingestResponse.ok) {
           throw new Error(`Workspace ingest failed with ${ingestResponse.status}`);
@@ -1845,43 +2025,46 @@
       }
 
       try {
-        const [datasetsResponse, sourcesResponse, analysisHealthResponse] = await Promise.all([
-          fetch("/api/datasets"),
+        const workspaceArea = getWorkspaceArea();
+        const [weatherResponse, sourcesResponse, analysisHealthResponse] = await Promise.all([
+          fetch(`/api/weather/current?area=${encodeURIComponent(workspaceArea)}`),
           fetch("/api/sources"),
           fetch("/api/analysis/health"),
         ]);
 
-        if (!datasetsResponse.ok || !sourcesResponse.ok) {
+        if (!weatherResponse.ok || !sourcesResponse.ok) {
           throw new Error("Workspace data requests failed");
         }
 
-        const datasets = await datasetsResponse.json();
+        const weatherPayload = await weatherResponse.json();
         state.sources = await sourcesResponse.json();
         state.analysisHealth = analysisHealthResponse.ok ? await analysisHealthResponse.json() : {
           provider: "unknown",
           status: "error",
           error: `Analysis health failed with ${analysisHealthResponse.status}`,
         };
-        state.weatherRecord = [...datasets].reverse().find((record) => record.category === "weather") || null;
+        state.weatherRecord = weatherPayload.record || null;
 
         renderOverlays();
         renderAgentButtons();
         renderWeather();
         renderFreshness(state.sources);
-        await Promise.all([
-          loadMapData(),
-          loadPoiMapData(),
-          loadCellTowerMapData(),
-          loadSatelliteMapData(),
-          loadBridgeMapData(),
-        ]);
+        const sourceIds = new Set(currentSourceIds());
+        const loaders = [loadMapData()];
+        if (sourceIds.has("osm-poi")) loaders.push(loadPoiMapData());
+        if (sourceIds.has("opencellid")) loaders.push(loadCellTowerMapData());
+        if (sourceIds.has("satellites")) loaders.push(loadSatelliteMapData());
+        if (sourceIds.has("digiroad")) loaders.push(loadBridgeMapData());
+        await Promise.all(loaders);
 
         if (state.selectionGeometry) {
           await inspectSelection(state.selectionGeometry);
-        } else if (datasets.length) {
+        } else if (state.sources.length) {
           renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
           if (!state.sources.some((source) => source.source_id === "nls" && source.status === "disabled")) {
-            statusLine.textContent = "Datasets ready. Shift + drag on the map to inspect an AOI.";
+            statusLine.textContent = state.loadTarget?.kind === "named_area"
+              ? "Datasets ready. Shift + drag on the map to inspect an AOI."
+              : "Custom area loaded. Shift + drag on the map to inspect an AOI inside the loaded rectangle.";
           }
         }
       } catch (error) {
@@ -1891,7 +2074,7 @@
         }
       } finally {
         refreshBtn.disabled = false;
-        refreshBtn.textContent = "Refresh Data";
+        refreshBtn.textContent = "Load Data";
       }
     }
 
@@ -1926,6 +2109,10 @@
         btn.style.marginBottom = "6px";
         btn.textContent = agent.label;
         btn.dataset.agentId = agent.id;
+        if (state.loadTarget?.kind !== "named_area") {
+          btn.disabled = true;
+          btn.title = "Agent runs are only enabled for named-area loads in this first implementation.";
+        }
         btn.addEventListener("click", () => runAgent(agent.id, btn));
         container.appendChild(btn);
       });
@@ -1938,7 +2125,7 @@
       statusLine.textContent = `Running ${agentId}...`;
 
       try {
-        const params = new URLSearchParams({ area: state.bootstrapArea, timeframe: state.timeframe });
+        const params = new URLSearchParams({ area: getWorkspaceArea(), timeframe: state.timeframe });
         const response = await fetch(`/api/agents/${agentId}/run?${params}`, {
           method: "POST",
         });
@@ -2052,10 +2239,33 @@
     wirePanelScrolling(document.querySelector(".inspector"));
 
     areaSelect.addEventListener("change", () => {
-      state.bootstrapArea = areaSelect.value;
-      state.map.setView(getCenter(state.bootstrapArea), 9);
+      setNamedAreaLoadTarget(areaSelect.value);
       clearSelection();
-      bootstrapWorkspace();
+      statusLine.textContent = "Preset area selected. Click Load Data to fetch datasets.";
+    });
+
+    usePresetBtn.addEventListener("click", () => {
+      setNamedAreaLoadTarget(areaSelect.value);
+      clearSelection();
+      statusLine.textContent = "Preset area selected. Click Load Data to fetch datasets.";
+    });
+
+    useViewBtn.addEventListener("click", () => {
+      if (!state.map) initMap();
+      const bbox = currentMapBbox();
+      setCustomLoadTarget(bbox, "Current Map View");
+      clearSelection();
+      statusLine.textContent = "Current map view selected as the load area. Click Load Data to fetch datasets.";
+    });
+
+    drawLoadAreaBtn.addEventListener("click", () => {
+      if (!state.map) initMap();
+      if (state.loadSelection.enabled) {
+        endLoadRectangleMode();
+        statusLine.textContent = "Load rectangle drawing cancelled.";
+        return;
+      }
+      beginLoadRectangleMode();
     });
 
     refreshBtn.addEventListener("click", bootstrapWorkspace);

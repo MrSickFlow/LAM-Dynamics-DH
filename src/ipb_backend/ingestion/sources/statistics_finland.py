@@ -6,10 +6,13 @@ import unicodedata
 from typing import Any, Optional
 
 import httpx
+from shapely.geometry import box, shape
 
+from ipb_backend.config import settings
 from ipb_backend.ingestion.base import SourceAdapter
-from ipb_backend.models import DatasetRecord
-from ipb_backend.spatial import format_bbox, resolve_area_bbox
+from ipb_backend.models import DatasetRecord, LoadTarget
+from ipb_backend.ingestion.sources.nls import NationalLandSurveyAdapter
+from ipb_backend.spatial import format_bbox, resolve_load_target_bbox, resolve_load_target_label
 
 AREA_MUNICIPALITIES: dict[str, list[str]] = {
     "north karelia": ["KU167", "KU176", "KU260", "KU422", "KU426", "KU276"],
@@ -89,12 +92,87 @@ class StatisticsFinlandAdapter(SourceAdapter):
         normalized = self._normalize_area(area)
         return AREA_MUNICIPALITIES.get(normalized, AREA_MUNICIPALITIES["north karelia"])
 
-    async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
+    def _scale_value(self, value: Any, coverage: float) -> int:
+        numeric_value = int(value or 0)
+        return max(0, round(numeric_value * coverage))
+
+    def _municipality_code(self, raw_code: Any) -> Optional[str]:
+        if raw_code is None:
+            return None
+        digits = "".join(char for char in str(raw_code) if char.isdigit())
+        if not digits:
+            return None
+        return f"KU{int(digits):03d}"
+
+    async def _resolve_municipality_coverages(
+        self,
+        area: str,
+        bbox: tuple[float, float, float, float],
+        load_target: LoadTarget | None,
+        client: httpx.AsyncClient,
+    ) -> tuple[list[str], dict[str, float]]:
+        if load_target is None:
+            municipalities = self._resolve_municipalities(area)
+            return municipalities, {code: 1.0 for code in municipalities}
+
+        if not settings.nls_api_key:
+            municipalities = self._resolve_municipalities(area)
+            return municipalities, {code: 1.0 for code in municipalities}
+
+        bbox_polygon = box(*bbox)
+        response = await client.get(
+            f"{NationalLandSurveyAdapter.BASE_URL}/collections/kunta/items",
+            params={
+                "bbox": format_bbox(bbox),
+                "limit": 100,
+                "api-key": settings.nls_api_key,
+            },
+        )
+        response.raise_for_status()
+
+        coverages: dict[str, float] = {}
+        for feature in response.json().get("features", []):
+            municipality_code = self._municipality_code((feature.get("properties") or {}).get("kuntatunnus"))
+            geometry = feature.get("geometry")
+            if not municipality_code or not geometry:
+                continue
+
+            try:
+                municipality_geometry = shape(geometry)
+            except Exception:
+                continue
+
+            if municipality_geometry.is_empty or municipality_geometry.area <= 0:
+                continue
+
+            overlap_area = bbox_polygon.intersection(municipality_geometry).area
+            if overlap_area <= 0:
+                continue
+
+            overlap_ratio = min(1.0, max(0.0, overlap_area / municipality_geometry.area))
+            if overlap_ratio <= 0:
+                continue
+            coverages[municipality_code] = max(coverages.get(municipality_code, 0.0), overlap_ratio)
+
+        if coverages:
+            municipalities = sorted(coverages.keys())
+            return municipalities, coverages
+
         municipalities = self._resolve_municipalities(area)
+        return municipalities, {code: 1.0 for code in municipalities}
+
+    async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
         latest_year = "2024"
-        bbox = resolve_area_bbox(area)
+        bbox = resolve_load_target_bbox(area, load_target)
+        area_label = resolve_load_target_label(area, load_target)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
+            municipalities, municipality_coverages = await self._resolve_municipality_coverages(
+                area,
+                bbox,
+                load_target,
+                client,
+            )
             query_total: dict[str, Any] = {
                 "query": [
                     {"code": "Alue", "selection": {"filter": "item", "values": municipalities}},
@@ -124,34 +202,36 @@ class StatisticsFinlandAdapter(SourceAdapter):
             resp_age.raise_for_status()
             age_data = resp_age.json()
 
-            urban_rural = await self._fetch_urban_rural(client, municipalities, latest_year)
+            urban_rural = await self._fetch_urban_rural(client, municipalities, municipality_coverages, latest_year)
 
-        pop_data = self._extract_population(total_data, municipalities)
-        age_dist = self._extract_age_distribution(age_data, all_ages, municipalities)
+        pop_data = self._extract_population(total_data, municipalities, municipality_coverages)
+        age_dist = self._extract_age_distribution(age_data, all_ages, municipalities, municipality_coverages)
         pop_data["age_distribution"] = age_dist
-        features = self._build_features(area, bbox, pop_data)
+        features = self._build_features(area_label, bbox, pop_data)
         pop_data["population_total"] = pop_data["total"]
         pop_data["urban_rural"] = urban_rural
 
         municipality_names = [MUNICIPALITY_LABELS.get(m, m) for m in municipalities]
         summary = (
-            f"Statistics Finland population data for {area}: "
+            f"Statistics Finland population data for {area_label}: "
             f"{pop_data['total']:,} inhabitants ({', '.join(municipality_names)}, {latest_year})"
         )
 
         return DatasetRecord(
             source_id=self.definition.source_id,
             category=self.definition.category,
-            area=area,
+            area=area_label,
             timeframe=timeframe,
+            load_target=load_target,
             summary=summary,
             data={
                 "provider": "Statistics Finland (Tilastokeskus)",
                 "api": "PxWeb API",
                 "license": "CC BY 4.0",
                 "query": {
-                    "area": area,
+                    "area": area_label,
                     "municipalities": municipalities,
+                    "municipality_coverages": municipality_coverages,
                     "year": latest_year,
                     "bbox_wgs84": format_bbox(bbox),
                 },
@@ -161,7 +241,13 @@ class StatisticsFinlandAdapter(SourceAdapter):
             },
         )
 
-    async def _fetch_urban_rural(self, client: httpx.AsyncClient, municipalities: list[str], year: str) -> dict:
+    async def _fetch_urban_rural(
+        self,
+        client: httpx.AsyncClient,
+        municipalities: list[str],
+        municipality_coverages: dict[str, float],
+        year: str,
+    ) -> dict:
         query = {
             "query": [
                 {"code": "Alue", "selection": {"filter": "item", "values": municipalities}},
@@ -184,10 +270,12 @@ class StatisticsFinlandAdapter(SourceAdapter):
 
         for m_idx, muni_code in enumerate(municipalities):
             base = m_idx * n_classes
+            coverage = municipality_coverages.get(muni_code, 1.0)
             muni_data: dict[str, int] = {}
             for c_idx, class_code in enumerate(URBAN_RURAL_CODES):
                 idx = base + c_idx
-                pop_val = int(values[idx]) if idx < len(values) and values[idx] is not None else 0
+                raw_value = values[idx] if idx < len(values) else 0
+                pop_val = self._scale_value(raw_value, coverage)
                 muni_data[class_code] = pop_val
                 totals[class_code] = totals.get(class_code, 0) + pop_val
             per_muni[muni_code] = {
@@ -200,7 +288,12 @@ class StatisticsFinlandAdapter(SourceAdapter):
             "total_by_class": {URBAN_RURAL_LABELS[k]: v for k, v in totals.items()},
         }
 
-    def _extract_population(self, raw: dict[str, Any], municipalities: list[str]) -> dict[str, Any]:
+    def _extract_population(
+        self,
+        raw: dict[str, Any],
+        municipalities: list[str],
+        municipality_coverages: dict[str, float],
+    ) -> dict[str, Any]:
         values = raw.get("value", [])
         n_muni = len(municipalities)
         stride = values_per_muni(raw, n_muni)
@@ -212,13 +305,14 @@ class StatisticsFinlandAdapter(SourceAdapter):
 
         for i in range(n_muni):
             base = i * stride
-            t = int(values[base]) if base < len(values) else 0
-            m = int(values[base + 1]) if base + 1 < len(values) else 0
-            f = int(values[base + 2]) if base + 2 < len(values) else 0
+            code = municipalities[i]
+            coverage = municipality_coverages.get(code, 1.0)
+            t = self._scale_value(values[base] if base < len(values) else 0, coverage)
+            m = self._scale_value(values[base + 1] if base + 1 < len(values) else 0, coverage)
+            f = self._scale_value(values[base + 2] if base + 2 < len(values) else 0, coverage)
             total += t
             male += m
             female += f
-            code = municipalities[i]
             per_muni[code] = {
                 "name": MUNICIPALITY_LABELS.get(code, code),
                 "total": t,
@@ -234,7 +328,11 @@ class StatisticsFinlandAdapter(SourceAdapter):
         }
 
     def _extract_age_distribution(
-        self, raw: dict[str, Any], all_ages: list[str], municipalities: list[str]
+        self,
+        raw: dict[str, Any],
+        all_ages: list[str],
+        municipalities: list[str],
+        municipality_coverages: dict[str, float],
     ) -> dict[str, Any]:
         values = raw.get("value", [])
         n_muni = len(municipalities)
@@ -243,6 +341,7 @@ class StatisticsFinlandAdapter(SourceAdapter):
         age_groups: dict[str, int] = {"0-14": 0, "15-64": 0, "65+": 0}
 
         for m in range(n_muni):
+            coverage = municipality_coverages.get(municipalities[m], 1.0)
             for a in range(1, n_ages):
                 idx = m * n_ages + a
                 if idx >= len(values):
@@ -250,6 +349,7 @@ class StatisticsFinlandAdapter(SourceAdapter):
                 pop_val = values[idx]
                 if pop_val is None:
                     continue
+                scaled_population = self._scale_value(pop_val, coverage)
                 age_key = all_ages[a]
                 age_val: Optional[int] = None
                 if age_key == "100-":
@@ -262,11 +362,11 @@ class StatisticsFinlandAdapter(SourceAdapter):
                 if age_val is None:
                     continue
                 if age_val <= 14:
-                    age_groups["0-14"] += pop_val
+                    age_groups["0-14"] += scaled_population
                 elif age_val <= 64:
-                    age_groups["15-64"] += pop_val
+                    age_groups["15-64"] += scaled_population
                 else:
-                    age_groups["65+"] += pop_val
+                    age_groups["65+"] += scaled_population
 
         total_known = sum(age_groups.values())
         return {

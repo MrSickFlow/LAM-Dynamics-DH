@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-import os
+import asyncio
 import re
 import unicodedata
 from typing import Any
@@ -9,7 +8,8 @@ from typing import Any
 import httpx
 
 from ipb_backend.ingestion.base import SourceAdapter
-from ipb_backend.models import DatasetRecord
+from ipb_backend.models import DatasetRecord, LoadTarget
+from ipb_backend.spatial import format_bbox, resolve_load_target_bbox, resolve_load_target_label
 
 AREA_BBOXES: dict[str, tuple[float, float, float, float]] = {
     "archipelago sea": (59.7, 21.0, 60.6, 23.0),
@@ -43,16 +43,6 @@ CATEGORY_QUERIES: dict[str, str] = {
 
 
 FOREST_TAGS = {"leaf_type", "leaf_cycle", "natural", "landuse", "name", "wood"}
-
-_AREA_FILE_SUFFIX: dict[str, str] = {
-    "north karelia": "north_karelia",
-    "archipelago sea": "archipelago_sea",
-    "lapland": "lapland",
-    "lapland (kasivarren lappi)": "lapland",
-    "kasivarren lappi": "lapland",
-}
-
-_STATIC_POI_DIR = os.path.join(os.path.dirname(__file__))
 
 
 def _filter_tags(tags: dict[str, str], category: str = "") -> dict[str, str]:
@@ -95,74 +85,61 @@ _CATEGORY_MAP: dict[str, str] = {
 }
 
 
-def _load_static_pois(area: str) -> dict[str, list[dict[str, Any]]]:
-    normalized = area.lower().strip()
-    suffix = _AREA_FILE_SUFFIX.get(normalized, "north_karelia")
-    filepath = os.path.join(_STATIC_POI_DIR, f"static_osm_poi_{suffix}.json")
-    if not os.path.exists(filepath):
-        return {}
-    with open(filepath) as f:
-        return json.load(f)
-
-
 class OsmPoiAdapter(SourceAdapter):
     BASE_URL = "https://overpass-api.de/api/interpreter"
+    REQUEST_TIMEOUT = httpx.Timeout(12.0, connect=5.0)
 
     def _resolve_bbox(self, area: str) -> tuple[float, float, float, float]:
         normalized = self._normalize_area(area)
         return AREA_BBOXES.get(normalized, AREA_BBOXES["north karelia"])
 
-    async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
-        bbox = self._resolve_bbox(area)
-        bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+    async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
+        bbox = resolve_load_target_bbox(area, load_target)
+        area_label = resolve_load_target_label(area, load_target)
+        bbox_str = format_bbox(bbox)
 
         categories: dict[str, list[dict[str, Any]]] = {}
         category_errors: dict[str, str] = {}
         total = 0
         provider = "OpenStreetMap contributors (ODbL)"
 
-        async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
-            for cat_name, cat_query in CATEGORY_QUERIES.items():
-                query = f'[out:json];({cat_query.format(bbox=bbox_str)});out center 200;'
-                try:
-                    resp = await client.post(self.BASE_URL, data={"data": query})
-                    resp.raise_for_status()
-                    data = resp.json()
-                    pois = [_feature_to_poi(el, cat_name) for el in data.get("elements", [])]
-                except Exception as e:
-                    pois = []
-                    category_errors[cat_name] = str(e)
+        async def fetch_category(client: httpx.AsyncClient, cat_name: str, cat_query: str) -> tuple[str, list[dict[str, Any]], str | None]:
+            query = f'[out:json];({cat_query.format(bbox=bbox_str)});out center 200;'
+            try:
+                resp = await client.post(self.BASE_URL, data={"data": query})
+                resp.raise_for_status()
+                data = resp.json()
+                pois = [_feature_to_poi(el, cat_name) for el in data.get("elements", [])]
+                return cat_name, pois, None
+            except Exception as exc:
+                return cat_name, [], str(exc)
 
+        async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
+            results = await asyncio.gather(
+                *(fetch_category(client, cat_name, cat_query) for cat_name, cat_query in CATEGORY_QUERIES.items())
+            )
+            for cat_name, pois, error in results:
+                if error:
+                    category_errors[cat_name] = error
                 categories[cat_name] = pois
                 total += len(pois)
 
         if category_errors and len(category_errors) == len(CATEGORY_QUERIES):
-            static = _load_static_pois(area)
-            if static:
-                categories = {}
-                total = 0
-                for cat_name in CATEGORY_QUERIES:
-                    items = static.get(cat_name, [])
-                    categories[cat_name] = items
-                    total += len(items)
-                provider = "OpenStreetMap (static extract, Overpass API unreachable)"
-            else:
-                for cat_name in CATEGORY_QUERIES:
-                    if cat_name not in categories:
-                        categories[cat_name] = []
-                provider = "OpenStreetMap contributors (static file not found)"
+            error_summary = "; ".join(f"{cat}: {err}" for cat, err in sorted(category_errors.items()))
+            raise ValueError(f"OSM POI fetch failed for all categories ({error_summary})")
 
         return DatasetRecord(
             source_id=self.definition.source_id,
             category=self.definition.category,
-            area=area,
+            area=area_label,
             timeframe=timeframe,
-            summary=f"OSM POIs for {area}: {total} features across {len(categories)} categories",
+            load_target=load_target,
+            summary=f"OSM POIs for {area_label}: {total} features across {len(categories)} categories",
             data={
                 "provider": provider,
-                "api": "Overpass API / static extract",
+                "api": "Overpass API",
                 "license": "ODbL",
-                "query": {"area": area, "bbox": bbox_str},
+                "query": {"area": area_label, "bbox": bbox_str},
                 "categories": {k: v for k, v in sorted(categories.items())},
                 "errors": category_errors,
                 "total_features": total,

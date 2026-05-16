@@ -231,6 +231,49 @@ def test_ingest_rejects_unknown_source_ids():
     assert response.json()["detail"] == "Unknown source ids: missing-source"
 
 
+def test_ingest_accepts_bbox_load_target(monkeypatch):
+    state["ingestion_service"]._records.clear()
+
+    async def fake_fetch(self, area, timeframe, load_target=None):
+        assert area == "Custom Load Area"
+        assert timeframe == "24h"
+        assert load_target is not None
+        assert load_target.kind.value == "bbox"
+        assert load_target.label == "Custom Load Area"
+        assert load_target.bbox_wgs84 == [29.9, 62.4, 30.2, 62.7]
+        return DatasetRecord(
+            source_id="osm-poi",
+            category=SourceCategory.OTHER,
+            area="Custom Load Area",
+            timeframe="24h",
+            load_target=load_target,
+            summary="OSM POIs for Custom Load Area",
+            data={"categories": {}, "total_features": 0},
+        )
+
+    monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
+
+    response = client.post(
+        "/api/ingest",
+        json={
+            "area": "Custom Load Area",
+            "timeframe": "24h",
+            "load_target": {
+                "kind": "bbox",
+                "label": "Custom Load Area",
+                "bbox_wgs84": [29.9, 62.4, 30.2, 62.7],
+            },
+            "source_ids": ["osm-poi"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requested_sources"] == ["osm-poi"]
+    assert payload["produced_records"][0]["area"] == "Custom Load Area"
+    assert payload["produced_records"][0]["load_target"]["kind"] == "bbox"
+
+
 def test_fmi_ingestion_flow(monkeypatch):
     state["ingestion_service"]._records.clear()
 

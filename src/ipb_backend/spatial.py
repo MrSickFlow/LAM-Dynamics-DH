@@ -6,8 +6,10 @@ import unicodedata
 from typing import Any, Optional
 
 from shapely import affinity
-from shapely.geometry import mapping, shape
+from shapely.geometry import box, mapping, shape
 from shapely.geometry.base import BaseGeometry
+
+from ipb_backend.models import LoadTarget, LoadTargetKind
 
 
 AREA_BBOXES: dict[str, tuple[float, float, float, float]] = {
@@ -26,6 +28,55 @@ def normalize_area_name(area: str) -> str:
 
 def resolve_area_bbox(area: str) -> tuple[float, float, float, float]:
     return AREA_BBOXES.get(normalize_area_name(area), AREA_BBOXES["north karelia"])
+
+
+def geometry_bounds(geometry: dict[str, Any]) -> tuple[float, float, float, float]:
+    geom = shape(geometry)
+    min_x, min_y, max_x, max_y = geom.bounds
+    return float(min_x), float(min_y), float(max_x), float(max_y)
+
+
+def bbox_to_polygon(bbox: tuple[float, float, float, float]) -> dict[str, Any]:
+    min_x, min_y, max_x, max_y = bbox
+    return mapping(box(min_x, min_y, max_x, max_y))
+
+
+def resolve_load_target_bbox(area: str, load_target: Optional[LoadTarget] = None) -> tuple[float, float, float, float]:
+    if load_target is None:
+        return resolve_area_bbox(area)
+
+    if load_target.kind == LoadTargetKind.BBOX and load_target.bbox_wgs84:
+        min_x, min_y, max_x, max_y = load_target.bbox_wgs84
+        return float(min_x), float(min_y), float(max_x), float(max_y)
+
+    if load_target.kind == LoadTargetKind.GEOMETRY and load_target.geometry:
+        return geometry_bounds(load_target.geometry)
+
+    if load_target.kind == LoadTargetKind.NAMED_AREA:
+        return resolve_area_bbox(load_target.label or area)
+
+    return resolve_area_bbox(area)
+
+
+def resolve_load_target_label(area: str, load_target: Optional[LoadTarget] = None) -> str:
+    if load_target is None:
+        return area
+    if load_target.label:
+        return load_target.label
+    if load_target.kind == LoadTargetKind.BBOX:
+        return "Custom BBox"
+    if load_target.kind == LoadTargetKind.GEOMETRY:
+        return "Custom Geometry"
+    return area
+
+
+def bbox_centroid(bbox: tuple[float, float, float, float]) -> tuple[float, float]:
+    min_x, min_y, max_x, max_y = bbox
+    return (min_y + max_y) / 2.0, (min_x + max_x) / 2.0
+
+
+def resolve_load_target_centroid(area: str, load_target: Optional[LoadTarget] = None) -> tuple[float, float]:
+    return bbox_centroid(resolve_load_target_bbox(area, load_target))
 
 
 def format_bbox(bbox: tuple[float, float, float, float]) -> str:
