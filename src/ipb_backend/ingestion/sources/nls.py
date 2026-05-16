@@ -36,6 +36,14 @@ class NationalLandSurveyAdapter(SourceAdapter):
         "taajaanrakennettualue": "Densely built areas",
         "rautatie": "Railways",
         "sahkolinja": "Power lines",
+        "paikannimi": "Place names",
+        "kunta": "Municipalities",
+        "kunnanhallintoraja": "Municipal boundaries",
+        "luonnonsuojelualue": "Protected areas",
+        "lentokenttaalue": "Airport areas",
+        "satamaalue": "Harbor areas",
+        "rautatieliikennepaikka": "Railway stations",
+        "osoitepiste": "Address points",
     }
 
     COLLECTION_NAMES = tuple(COLLECTIONS.keys())
