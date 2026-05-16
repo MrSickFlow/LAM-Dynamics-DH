@@ -1129,17 +1129,6 @@
           </div>
         </div>
 
-        <div class="panel-card is-collapsible" id="agents-panel">
-          <button class="panel-card-header" id="agents-panel-toggle" type="button" aria-expanded="true">
-            <div class="panel-title">Analysis Agents</div>
-            <span class="collapse-icon">▾</span>
-          </button>
-          <div class="panel-card-body" id="agents-panel-body">
-            <div class="panel-copy">Run individual analysis agents against the current workspace area.</div>
-            <div id="agent-buttons"></div>
-          </div>
-        </div>
-
         <div class="panel-card is-collapsible" id="planning-panel">
           <button class="panel-card-header" id="planning-panel-toggle" type="button" aria-expanded="false">
             <div class="panel-title">Mission Planning</div>
@@ -1157,6 +1146,7 @@
                 <option value="screen">Screen</option>
                 <option value="logistics_hub">Logistics Hub</option>
                 <option value="withdrawal">Withdrawal</option>
+                <option value="fire_support">Fire Support</option>
               </select>
             </div>
 
@@ -1205,6 +1195,10 @@
             <div id="plan-vehicles" class="plan-asset-list"></div>
             <button class="btn btn-secondary plan-add-btn" id="plan-add-vehicle" type="button">+ Add vehicle</button>
 
+            <div class="plan-section-title">Artillery</div>
+            <div id="plan-artillery" class="plan-asset-list"></div>
+            <button class="btn btn-secondary plan-add-btn" id="plan-add-artillery" type="button">+ Add artillery</button>
+
             <div class="plan-section-title">Drones</div>
             <div id="plan-drones" class="plan-asset-list"></div>
             <button class="btn btn-secondary plan-add-btn" id="plan-add-drone" type="button">+ Add drone</button>
@@ -1234,83 +1228,54 @@
       <div class="map-watermark">Selection: <strong id="selection-label">No AOI selected</strong></div>
     </div>
 
-    <aside class="inspector">
+    <aside class="inspector" id="inspector-panel">
       <div class="section">
         <div class="section-body">
-          <h1 class="headline">AOI Inspector</h1>
-          <p class="subhead">Raw source data, source freshness, grounded agent interpretation, and follow-up conversation all track the AOI you draw on the map.</p>
+          <h1 class="headline">AOI Analysis</h1>
+          <p class="subhead" id="selection-meta">Draw a polygon on the map to inspect the area and start a conversation with the AI analyst.</p>
         </div>
       </div>
 
-      <div class="section is-collapsible" data-section>
+      <div class="section is-collapsible" data-section id="chat-section">
         <button class="section-toggle" type="button" aria-expanded="true">
-          <div class="section-header">AOI Metrics</div>
-          <span class="collapse-icon">▾</span>
-        </button>
-        <div class="section-body">
-          <div class="metrics-grid" id="metrics-grid"></div>
-          <div class="selection-meta" id="selection-meta">Draw an AOI to inspect intersecting source data.</div>
-        </div>
-      </div>
-
-      <div class="section is-collapsible" data-section>
-        <button class="section-toggle" type="button" aria-expanded="true">
-          <div class="section-header">Agent Interpreter</div>
-          <span class="collapse-icon">▾</span>
-        </button>
-        <div class="section-body">
-          <p class="agent-summary" id="agent-summary">Awaiting an AOI. The grounded agent summary will cite the intersecting evidence bundle here.</p>
-          <div class="agent-meta" id="agent-meta"></div>
-          <div class="conversation-toolbar">
-            <div class="bullet-group-label">Weather</div>
-          </div>
-          <div class="weather-grid" id="weather-grid">
-            <div class="weather-metric"><div class="val" id="w-temp">--</div><div class="lbl">Temp</div></div>
-            <div class="weather-metric"><div class="val" id="w-wind">--</div><div class="lbl">Wind</div></div>
-            <div class="weather-metric"><div class="val" id="w-humidity">--</div><div class="lbl">Humidity</div></div>
-            <div class="weather-metric"><div class="val" id="w-pressure">--</div><div class="lbl">Pressure</div></div>
-            <div class="weather-metric"><div class="val" id="w-vis">--</div><div class="lbl">Visibility</div></div>
-            <div class="weather-metric"><div class="val" id="w-cloud">--</div><div class="lbl">Cloud</div></div>
-          </div>
-          <div class="weather-station" id="w-station">No weather data loaded</div>
-          <div class="bullet-group-label">Findings</div>
-          <div class="bullet-list" id="agent-findings"></div>
-          <div class="agent-limitations" id="agent-limitations"></div>
-          <div class="bullet-group-label">Evidence</div>
-          <div class="bullet-list" id="agent-evidence"></div>
-        </div>
-      </div>
-
-      <div class="section is-collapsible" data-section>
-        <button class="section-toggle" type="button" aria-expanded="true">
-          <div class="section-header">Conversation Window</div>
+          <div class="section-header">AI Analyst Chat</div>
           <span class="collapse-icon">▾</span>
         </button>
         <div class="section-body">
           <div class="conversation-toolbar">
-            <label for="analysis-profile">Analysis Profile</label>
+            <label for="analysis-profile">Profile</label>
             <select id="analysis-profile" class="profile-select"></select>
           </div>
           <div class="conversation-context" id="conversation-context"></div>
           <div class="chat-thread" id="chat-thread"></div>
           <div class="chat-composer">
-            <textarea id="chat-input" class="chat-input" placeholder="Ask about mobility, concealment, surveillance, infrastructure resilience, logistics, or communications using only the AOI evidence package." disabled></textarea>
+            <textarea id="chat-input" class="chat-input" placeholder="Draw an AOI polygon on the map first, then ask about mobility, concealment, surveillance, logistics, or communications..." disabled></textarea>
             <button class="btn btn-primary chat-send" id="chat-send-btn" type="button" disabled>Send</button>
           </div>
-          <div class="conversation-note">The conversation agent only receives normalized source digests, derived indicators, evidence ids, and quality guardrails. Raw extraction stays deterministic.</div>
         </div>
       </div>
 
-      <div class="section is-collapsible" data-section>
-        <button class="section-toggle" type="button" aria-expanded="true">
-          <div class="section-header">Agent Run Results</div>
+      <div class="section is-collapsible is-collapsed" data-section>
+        <button class="section-toggle" type="button" aria-expanded="false">
+          <div class="section-header">AOI Metrics</div>
           <span class="collapse-icon">▾</span>
         </button>
         <div class="section-body">
-          <div id="agent-run-display">
-            <p class="empty-state">Run an agent from the settings panel to see results here.</p>
-          </div>
+          <div class="metrics-grid" id="metrics-grid"></div>
         </div>
+      </div>
+
+      <!-- hidden elements kept for JS compatibility -->
+      <div style="display:none">
+        <p id="agent-summary"></p>
+        <div id="agent-meta"></div>
+        <div id="agent-findings"></div>
+        <div id="agent-limitations"></div>
+        <div id="agent-evidence"></div>
+        <div id="agent-run-display"></div>
+        <div id="w-temp"></div><div id="w-wind"></div><div id="w-humidity"></div>
+        <div id="w-pressure"></div><div id="w-vis"></div><div id="w-cloud"></div>
+        <div id="w-station"></div><div class="weather-grid" id="weather-grid"></div>
       </div>
 
       <div class="section is-collapsible" data-section>
@@ -2689,7 +2654,7 @@
 
     function renderEmptyInspector(message) {
       renderMetrics(null);
-      selectionMeta.textContent = message || "Draw an AOI to inspect intersecting source data.";
+      selectionMeta.textContent = message || "Draw a polygon on the map to inspect the area and start a conversation with the AI analyst.";
       renderAgent(null);
       renderConversationEmpty(message);
       renderFreshness(state.sources);
@@ -2699,10 +2664,11 @@
     function renderInspection(payload) {
       state.latestInspection = payload;
       selectionLabel.textContent = `${payload.metrics.selection_area_sqkm} km2 AOI`;
-      selectionMeta.textContent = `Bounds: ${payload.selection.bounds.map((value) => value.toFixed(3)).join(", ")}`;
+      selectionMeta.textContent = `${payload.metrics.selection_area_sqkm} km² · Bounds: ${payload.selection.bounds.map((v) => v.toFixed(3)).join(", ")}`;
       renderMetrics(payload.metrics);
       renderAgent(payload.agent);
       setConversationFromInspection(payload);
+      document.getElementById("chat-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
       renderFreshness(payload.freshness);
       renderRawData(payload.raw_sections, payload.raw_data);
     }
@@ -2848,6 +2814,7 @@
 
     function renderAgentButtons() {
       const container = document.getElementById("agent-buttons");
+      if (!container) return;
       container.innerHTML = "";
       AGENTS_LIST.forEach((agent) => {
         const btn = document.createElement("button");
@@ -2895,6 +2862,7 @@
 
     function displayAgentRunResult(agentId, result) {
       const display = document.getElementById("agent-run-display");
+      if (!display) return;
       const agent = AGENTS_LIST.find((a) => a.id === agentId);
       const label = agent ? agent.label : agentId;
 
@@ -2956,14 +2924,6 @@
       overlayPanel.classList.toggle("is-collapsed");
       const expanded = !overlayPanel.classList.contains("is-collapsed");
       overlayPanelToggle.setAttribute("aria-expanded", String(expanded));
-    });
-
-    const agentsPanel = document.getElementById("agents-panel");
-    const agentsPanelToggle = document.getElementById("agents-panel-toggle");
-    agentsPanelToggle.addEventListener("click", () => {
-      agentsPanel.classList.toggle("is-collapsed");
-      const expanded = !agentsPanel.classList.contains("is-collapsed");
-      agentsPanelToggle.setAttribute("aria-expanded", String(expanded));
     });
 
     inspectorSections.forEach((section) => {
@@ -3036,23 +2996,46 @@
 
     /* ===== Mission Planning ===== */
     const VEHICLE_PRESETS = {
-      "BMP-2":        { weight_t: 14.0, width_m: 3.15, height_m: 2.45, length_m: 6.74, off_road_capable: true },
-      "Leopard 2A6":  { weight_t: 62.0, width_m: 3.75, height_m: 3.00, length_m: 9.97, off_road_capable: true },
-      "Patria AMV":   { weight_t: 26.0, width_m: 2.90, height_m: 2.80, length_m: 7.70, off_road_capable: true },
-      "M113 APC":     { weight_t: 12.3, width_m: 2.69, height_m: 2.50, length_m: 4.86, off_road_capable: true },
-      "Truck (6t)":   { weight_t: 6.0,  width_m: 2.50, height_m: 3.00, length_m: 7.50, off_road_capable: false },
-      "Truck (heavy)":{ weight_t: 18.0, width_m: 2.55, height_m: 3.40, length_m: 9.50, off_road_capable: false },
+      // Finnish Defence Forces & allied vehicles in FDF inventory
+      "Leopard 2A4":    { weight_t: 62.0, width_m: 3.76, height_m: 3.00, length_m: 10.97, off_road_capable: true },
+      "Leopard 2A6":    { weight_t: 62.0, width_m: 3.75, height_m: 3.00, length_m: 9.97,  off_road_capable: true },
+      "CV9030 IFV":     { weight_t: 30.0, width_m: 3.10, height_m: 2.80, length_m: 6.55,  off_road_capable: true },
+      "Patria AMV":     { weight_t: 26.0, width_m: 2.90, height_m: 2.80, length_m: 7.70,  off_road_capable: true },
+      "Patria AMV XP":  { weight_t: 32.0, width_m: 2.80, height_m: 2.80, length_m: 8.10,  off_road_capable: true },
+      "XA-185 Pasi":    { weight_t: 19.0, width_m: 2.90, height_m: 2.60, length_m: 7.35,  off_road_capable: true },
+      "BMP-2":          { weight_t: 14.0, width_m: 3.15, height_m: 2.45, length_m: 6.74,  off_road_capable: true },
+      "M113 APC":       { weight_t: 12.3, width_m: 2.69, height_m: 2.50, length_m: 4.86,  off_road_capable: true },
+      "Sisu GTP":       { weight_t: 14.0, width_m: 2.50, height_m: 2.80, length_m: 6.00,  off_road_capable: true },
+      "Sisu E13TP":     { weight_t: 36.0, width_m: 2.60, height_m: 3.20, length_m: 9.50,  off_road_capable: false },
+      "Truck (6t)":     { weight_t: 6.0,  width_m: 2.50, height_m: 3.00, length_m: 7.50,  off_road_capable: false },
+      "Truck (heavy)":  { weight_t: 18.0, width_m: 2.55, height_m: 3.40, length_m: 9.50,  off_road_capable: false },
+    };
+    const ARTILLERY_PRESETS = {
+      // Self-propelled howitzers
+      "K9 Thunder (SPH)":     { weight_t: 48.5, caliber_mm: 155, max_range_km: 40.0, is_self_propelled: true,  width_m: 3.40, height_m: 2.73, length_m: 12.00 },
+      "2S1 Gvozdika (SPH)":   { weight_t: 16.0, caliber_mm: 122, max_range_km: 22.0, is_self_propelled: true,  width_m: 2.85, height_m: 2.40, length_m: 7.57 },
+      "XA-361 AMOS (SPH)":    { weight_t: 32.0, caliber_mm: 120, max_range_km: 13.0, is_self_propelled: true,  width_m: 2.80, height_m: 2.80, length_m: 8.10 },
+      // Towed artillery
+      "K98 (towed 155mm)":    { weight_t: 14.6, caliber_mm: 155, max_range_km: 43.0, is_self_propelled: false, width_m: 2.60, height_m: 1.90, length_m: 8.80 },
+      "D-30 (towed 122mm)":   { weight_t: 3.2,  caliber_mm: 122, max_range_km: 22.0, is_self_propelled: false, width_m: 1.95, height_m: 1.66, length_m: 5.40 },
+      // Mortars
+      "120mm Mortar":         { weight_t: 0.5,  caliber_mm: 120, max_range_km: 8.0,  is_self_propelled: false, width_m: 0.60, height_m: 1.10, length_m: 1.75 },
     };
     const DRONE_PRESETS = {
-      "Bayraktar TB2": { max_wind_ms: 12.0, max_precip_mm_h: 2.0, range_km: 150, min_visibility_m: 2000 },
-      "DJI Mavic 3":   { max_wind_ms: 12.0, max_precip_mm_h: 0.5, range_km: 15,  min_visibility_m: 1000 },
-      "Switchblade":   { max_wind_ms: 15.0, max_precip_mm_h: 5.0, range_km: 40,  min_visibility_m: 1500 },
-      "Heron TP":      { max_wind_ms: 18.0, max_precip_mm_h: 5.0, range_km: 1000, min_visibility_m: 3000 },
+      // FDF-relevant ISR/strike systems
+      "Bayraktar TB2":  { max_wind_ms: 12.0, max_precip_mm_h: 2.0, range_km: 150,  min_visibility_m: 2000 },
+      "RQ-35 Heidrun":  { max_wind_ms: 16.0, max_precip_mm_h: 3.0, range_km: 50,   min_visibility_m: 1500, endurance_min: 100 },
+      "Parrot ANAFI":   { max_wind_ms: 8.0,  max_precip_mm_h: 0.5, range_km: 4,    min_visibility_m: 500,  endurance_min: 32 },
+      "DJI Mavic 3":    { max_wind_ms: 12.0, max_precip_mm_h: 0.5, range_km: 15,   min_visibility_m: 1000 },
+      "Switchblade 300":{ max_wind_ms: 15.0, max_precip_mm_h: 5.0, range_km: 10,   min_visibility_m: 1500 },
+      "Switchblade 600":{ max_wind_ms: 15.0, max_precip_mm_h: 5.0, range_km: 40,   min_visibility_m: 1500 },
+      "Heron TP":       { max_wind_ms: 18.0, max_precip_mm_h: 5.0, range_km: 1000, min_visibility_m: 3000 },
     };
 
     const planningState = {
-      vehicles: [{ designation: "BMP-2", count: 4 }],
-      drones: [{ designation: "Bayraktar TB2", count: 2 }],
+      vehicles: [{ designation: "Leopard 2A4", count: 4 }],
+      artillery: [],
+      drones: [{ designation: "RQ-35 Heidrun", count: 2 }],
       layer: null,
       lastResponse: null,
     };
@@ -3110,6 +3093,9 @@
         if (preset) {
           if (kind === "vehicle") {
             meta.textContent = `${preset.weight_t}t · ${preset.width_m}m wide · ${preset.height_m}m tall`;
+          } else if (kind === "artillery") {
+            const spLabel = preset.is_self_propelled ? "SPH" : "towed";
+            meta.textContent = `${preset.weight_t}t · ${preset.caliber_mm}mm · ${preset.max_range_km}km · ${spLabel}`;
           } else {
             meta.textContent = `wind ≤ ${preset.max_wind_ms}m/s · precip ≤ ${preset.max_precip_mm_h}mm · ${preset.range_km}km range`;
           }
@@ -3126,6 +3112,9 @@
     function renderPlanVehicles() {
       renderPlanAssetList("plan-vehicles", VEHICLE_PRESETS, planningState.vehicles, "vehicle");
     }
+    function renderPlanArtillery() {
+      renderPlanAssetList("plan-artillery", ARTILLERY_PRESETS, planningState.artillery, "artillery");
+    }
     function renderPlanDrones() {
       renderPlanAssetList("plan-drones", DRONE_PRESETS, planningState.drones, "drone");
     }
@@ -3133,6 +3122,10 @@
     document.getElementById("plan-add-vehicle").addEventListener("click", () => {
       planningState.vehicles.push({ designation: "Truck (6t)", count: 1 });
       renderPlanVehicles();
+    });
+    document.getElementById("plan-add-artillery").addEventListener("click", () => {
+      planningState.artillery.push({ designation: "120mm Mortar", count: 2 });
+      renderPlanArtillery();
     });
     document.getElementById("plan-add-drone").addEventListener("click", () => {
       planningState.drones.push({ designation: "DJI Mavic 3", count: 1 });
@@ -3152,6 +3145,20 @@
           off_road_capable: preset.off_road_capable,
         };
       });
+      const artillery = planningState.artillery.map((a) => {
+        const preset = ARTILLERY_PRESETS[a.designation];
+        return {
+          designation: a.designation,
+          count: a.count,
+          weight_t: preset.weight_t,
+          caliber_mm: preset.caliber_mm,
+          max_range_km: preset.max_range_km,
+          is_self_propelled: preset.is_self_propelled,
+          width_m: preset.width_m,
+          height_m: preset.height_m,
+          length_m: preset.length_m,
+        };
+      });
       const drones = planningState.drones.map((d) => {
         const preset = DRONE_PRESETS[d.designation];
         return {
@@ -3161,6 +3168,7 @@
           max_precip_mm_h: preset.max_precip_mm_h,
           range_km: preset.range_km,
           min_visibility_m: preset.min_visibility_m,
+          ...(preset.endurance_min ? { endurance_min: preset.endurance_min } : {}),
         };
       });
 
@@ -3173,6 +3181,7 @@
         force: {
           infantry: parseInt(document.getElementById("plan-infantry").value, 10) || 0,
           vehicles,
+          artillery,
           drones,
           column_movement: document.getElementById("plan-column").checked,
         },
@@ -3396,6 +3405,7 @@
     }
 
     renderPlanVehicles();
+    renderPlanArtillery();
     renderPlanDrones();
     /* ===== /Mission Planning ===== */
 

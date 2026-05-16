@@ -13,6 +13,7 @@ class OperationType(str, Enum):
     SCREEN = "screen"
     LOGISTICS_HUB = "logistics_hub"
     WITHDRAWAL = "withdrawal"
+    FIRE_SUPPORT = "fire_support"
 
 
 class Priority(str, Enum):
@@ -34,6 +35,18 @@ class Vehicle(BaseModel):
     off_road_capable: bool = True
 
 
+class Artillery(BaseModel):
+    designation: str = Field(..., description="Model/type, e.g. 'K9 Thunder', 'D-30'")
+    count: int = Field(1, ge=1)
+    weight_t: float = Field(..., ge=0, description="Combat weight in tonnes")
+    caliber_mm: int = Field(..., ge=20, description="Main gun caliber in mm")
+    max_range_km: float = Field(..., ge=0, description="Maximum effective range in km")
+    is_self_propelled: bool = Field(True, description="False = towed/dismounted")
+    width_m: Optional[float] = Field(None, ge=0)
+    height_m: Optional[float] = Field(None, ge=0)
+    length_m: Optional[float] = Field(None, ge=0)
+
+
 class Drone(BaseModel):
     designation: str
     count: int = Field(1, ge=1)
@@ -48,6 +61,7 @@ class Drone(BaseModel):
 class ForceComposition(BaseModel):
     infantry: int = Field(0, ge=0)
     vehicles: list[Vehicle] = Field(default_factory=list)
+    artillery: list[Artillery] = Field(default_factory=list)
     drones: list[Drone] = Field(default_factory=list)
     logistics_demand_t_per_day: float = Field(0.0, ge=0)
     comms_range_required_km: float = Field(0.0, ge=0)
@@ -67,6 +81,10 @@ class ForceComposition(BaseModel):
     @property
     def tallest_vehicle_m(self) -> float:
         return max((v.height_m for v in self.vehicles), default=0.0)
+
+    @property
+    def heaviest_artillery_t(self) -> float:
+        return max((a.weight_t for a in self.artillery), default=0.0)
 
     @property
     def min_drone_wind_tolerance_ms(self) -> Optional[float]:

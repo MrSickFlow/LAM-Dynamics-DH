@@ -6,7 +6,7 @@ from ipb_backend.analysis.analyzers import OllamaAnalyzer
 
 def test_ollama_analyzer_parses_structured_json(monkeypatch):
     async def fake_generate_payload(self, prompt):
-        assert "Return strict JSON" in prompt
+        assert "Return JSON" in prompt
         return {
             "response": json.dumps(
                 {

@@ -62,6 +62,14 @@ OPERATION_PROFILES: dict[OperationType, dict[str, float]] = {
         "comms_coverage": 0.10,
         "logistics_proximity": 0.10,
     },
+    OperationType.FIRE_SUPPORT: {
+        "concealment": 0.30,
+        "observation": 0.15,
+        "road_access": 0.20,
+        "civilian_avoidance": 0.15,
+        "comms_coverage": 0.10,
+        "logistics_proximity": 0.10,
+    },
 }
 
 

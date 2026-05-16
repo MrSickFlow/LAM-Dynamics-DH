@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from ipb_backend.main import app, state
 from ipb_backend.models import DatasetRecord, SourceCategory
 from ipb_backend.planning import (
+    Artillery,
     OPERATION_PROFILES,
     Drone,
     ForceComposition,
@@ -310,6 +311,44 @@ def test_planning_recommend_endpoint_round_trip():
     assert payload["top_sites"]
     assert payload["top_sites"][0]["rank"] == 1
     assert "concealment" in payload["weights"]
+
+
+def test_artillery_model_and_force_properties():
+    arty = Artillery(designation="K9 Thunder", count=2, weight_t=48.5, caliber_mm=155, max_range_km=40.0, is_self_propelled=True)
+    assert arty.weight_t == 48.5
+    assert arty.is_self_propelled is True
+
+    force = ForceComposition(
+        artillery=[arty, Artillery(designation="D-30", count=4, weight_t=3.2, caliber_mm=122, max_range_km=22.0, is_self_propelled=False)],
+    )
+    assert force.heaviest_artillery_t == 48.5
+
+
+def test_constraint_artillery_bridge_weight():
+    features = CellFeatures()
+    features.min_bridge_capacity_t = 40.0
+
+    force = ForceComposition(
+        artillery=[Artillery(designation="K9 Thunder", count=1, weight_t=48.5, caliber_mm=155, max_range_km=40.0, is_self_propelled=True)],
+    )
+    matches = check_constraints(features, force)
+    arty_match = next(m for m in matches if m.name == "bridge_weight_artillery")
+    assert arty_match.passed is False
+    assert arty_match.required == 48.5
+
+    light_force = ForceComposition(
+        artillery=[Artillery(designation="D-30", count=2, weight_t=3.2, caliber_mm=122, max_range_km=22.0, is_self_propelled=False)],
+    )
+    matches = check_constraints(features, light_force)
+    arty_match = next(m for m in matches if m.name == "bridge_weight_artillery")
+    assert arty_match.passed is True
+
+
+def test_fire_support_profile_in_operation_profiles():
+    assert OperationType.FIRE_SUPPORT in OPERATION_PROFILES
+    weights = OPERATION_PROFILES[OperationType.FIRE_SUPPORT]
+    assert abs(sum(weights.values()) - 1.0) < 1e-6
+    assert weights["concealment"] >= 0.25
 
 
 def test_planning_recommend_endpoint_rejects_bad_geometry():

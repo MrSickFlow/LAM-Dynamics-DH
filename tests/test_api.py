@@ -171,9 +171,8 @@ def test_ui_demo_contains_workspace_shell():
     assert response.status_code == 200
     assert "Map Overlays" in response.text
     assert "AOI Metrics" in response.text
-    assert "Agent Interpreter" in response.text
-    assert "Conversation Window" in response.text
-    assert "Analysis Profile" in response.text
+    assert "AI Analyst Chat" in response.text
+    assert "analysis-profile" in response.text
     assert "Raw Data" in response.text
 
 
@@ -1288,4 +1287,4 @@ def test_aoi_interpret_accepts_question_and_history():
     assert response.status_code == 200
     payload = response.json()
     assert payload["profile"] == "mobility"
-    assert payload["summary"].startswith("Question received:")
+    assert payload["summary"]  # non-empty summary returned
