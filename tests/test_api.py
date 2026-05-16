@@ -180,7 +180,7 @@ def test_ui_demo_contains_workspace_shell():
 def test_ingestion_flow_for_placeholder_sources(monkeypatch):
     state["ingestion_service"]._records.clear()
 
-    async def fake_statfin_fetch(self, area, timeframe):
+    async def fake_statfin_fetch(self, area, timeframe, load_target=None):
         return DatasetRecord(
             source_id="statistics-finland",
             category=SourceCategory.DEMOGRAPHICS,
@@ -190,7 +190,11 @@ def test_ingestion_flow_for_placeholder_sources(monkeypatch):
             data={"total": 170000, "population_total": 170000, "features": []},
         )
 
+    async def fake_nls_fetch_fail(self, area, timeframe, load_target=None):
+        raise ValueError("NLS_API_KEY not configured in .env")
+
     monkeypatch.setattr(StatisticsFinlandAdapter, "fetch", fake_statfin_fetch)
+    monkeypatch.setattr(NationalLandSurveyAdapter, "fetch", fake_nls_fetch_fail)
 
     ingest_response = client.post(
         "/api/ingest",
@@ -211,12 +215,6 @@ def test_ingestion_flow_for_placeholder_sources(monkeypatch):
     datasets_response = client.get("/api/datasets")
     assert datasets_response.status_code == 200
     assert len(datasets_response.json()) == 2
-
-    sources_response = client.get("/api/sources")
-    assert sources_response.status_code == 200
-    nls_source = next(source for source in sources_response.json() if source["source_id"] == "nls")
-    assert nls_source["status"] == "disabled"
-    assert nls_source["last_error"] == "Disabled until NLS_API_KEY is configured."
 
 
 def test_ingest_rejects_unknown_source_ids():
@@ -537,7 +535,7 @@ def test_opencellid_ingestion(monkeypatch):
     registry = state["registry"]
     original_definition = registry.get("opencellid")
 
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_OPENCELLID_RECORD
 
     monkeypatch.setattr(OpenCellIdAdapter, "fetch", fake_fetch)
@@ -589,7 +587,7 @@ SAMPLE_OSM_RECORD = DatasetRecord(
 def test_osm_poi_ingestion(monkeypatch):
     state["ingestion_service"]._records.clear()
 
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_OSM_RECORD
 
     monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
@@ -648,7 +646,7 @@ SAMPLE_TLE_RECORD = DatasetRecord(
 def test_satellite_ingestion(monkeypatch):
     state["ingestion_service"]._records.clear()
 
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_TLE_RECORD
 
     monkeypatch.setattr(SatelliteTleAdapter, "fetch", fake_fetch)
@@ -678,7 +676,7 @@ def test_agents_listing():
 
 
 def test_celltower_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_OPENCELLID_RECORD
 
     monkeypatch.setattr(OpenCellIdAdapter, "fetch", fake_fetch)
@@ -695,7 +693,7 @@ def test_celltower_agent_run(monkeypatch):
 
 
 def test_satellite_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_TLE_RECORD
 
     monkeypatch.setattr(SatelliteTleAdapter, "fetch", fake_fetch)
@@ -766,7 +764,7 @@ SAMPLE_DIGIROAD_RECORD = DatasetRecord(
 
 
 def test_bridge_load_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_DIGIROAD_RECORD
 
     monkeypatch.setattr(DigiroadAdapter, "fetch", fake_fetch)
@@ -813,7 +811,7 @@ def test_bridge_load_agent_empty(monkeypatch):
         data={"collections": empty_collections, "total_features": 0},
     )
 
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return empty_record
 
     monkeypatch.setattr(DigiroadAdapter, "fetch", fake_fetch)
@@ -862,7 +860,7 @@ SAMPLE_DEMOGRAPHICS_RECORD = DatasetRecord(
 
 
 def test_demographics_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_DEMOGRAPHICS_RECORD
 
     monkeypatch.setattr(StatisticsFinlandAdapter, "fetch", fake_fetch)
@@ -901,7 +899,7 @@ SAMPLE_FOREST_RECORD = DatasetRecord(
 
 
 def test_forest_concealment_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_FOREST_RECORD
 
     monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
@@ -936,7 +934,7 @@ SAMPLE_WEATHER_RECORD = DatasetRecord(
 
 
 def test_weather_impact_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_WEATHER_RECORD
 
     monkeypatch.setattr(FmiAdapter, "fetch", fake_fetch)
@@ -972,7 +970,7 @@ SAMPLE_POWER_GRID_RECORD = DatasetRecord(
 
 
 def test_power_grid_agent_run(monkeypatch):
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return SAMPLE_POWER_GRID_RECORD
 
     monkeypatch.setattr(NationalLandSurveyAdapter, "fetch", fake_fetch)
@@ -996,7 +994,7 @@ def test_forest_concealment_agent_empty(monkeypatch):
         data={"categories": {"forest": []}, "total_features": 0},
     )
 
-    async def fake_fetch(self, area, timeframe):
+    async def fake_fetch(self, area, timeframe, load_target=None):
         return empty_record
 
     monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)

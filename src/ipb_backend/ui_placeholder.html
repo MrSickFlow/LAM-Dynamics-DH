@@ -230,6 +230,234 @@
       cursor: wait;
     }
 
+    .plan-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .plan-row.plan-checkbox {
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: var(--ink);
+    }
+    .plan-label {
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .plan-row input[type="number"],
+    .plan-row input[type="text"] {
+      padding: 7px 10px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.8);
+      font-size: 0.88rem;
+    }
+    .plan-grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .plan-section-title {
+      margin: 10px 0 6px;
+      font-size: 0.75rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .plan-asset-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .plan-asset-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px;
+      padding: 8px;
+      border-radius: 10px;
+      background: rgba(20, 38, 29, 0.05);
+      border: 1px solid var(--line);
+    }
+    .plan-asset-row select {
+      width: 100%;
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 0.82rem;
+    }
+    .plan-asset-row .plan-asset-meta {
+      grid-column: 1 / -1;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .plan-asset-count {
+      width: 56px;
+    }
+    .plan-asset-remove {
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .plan-add-btn {
+      margin-bottom: 6px;
+    }
+    .plan-run-btn {
+      width: 100%;
+      margin-top: 8px;
+    }
+    .plan-status {
+      margin-top: 8px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      min-height: 1.2em;
+    }
+    .planning-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .planning-stat {
+      flex: 1;
+      min-width: 120px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(20, 38, 29, 0.05);
+      border: 1px solid var(--line);
+    }
+    .planning-stat .lbl {
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .planning-stat .val {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    .planning-note {
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-style: italic;
+      margin: 4px 0 8px;
+    }
+    .planning-site {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      cursor: pointer;
+      transition: border-color 0.15s ease;
+    }
+    .planning-site:hover { border-color: var(--accent); }
+    .planning-site.is-infeasible { background: rgba(184, 80, 60, 0.06); }
+    .planning-site-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .planning-rank {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: #fff;
+      font-size: 0.82rem;
+      flex-shrink: 0;
+    }
+    .planning-site-title {
+      font-weight: 700;
+      color: var(--ink);
+      font-size: 0.95rem;
+    }
+    .planning-score {
+      margin-left: auto;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .planning-breakdown {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      margin: 6px 0;
+    }
+    .planning-bar {
+      display: flex;
+      flex-direction: column;
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+    .planning-bar-fill {
+      height: 6px;
+      background: rgba(20, 38, 29, 0.1);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 2px;
+    }
+    .planning-bar-fill > span {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+    }
+    .planning-constraints {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .planning-constraint {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(20, 38, 29, 0.08);
+      color: var(--ink);
+    }
+    .planning-constraint.fail {
+      background: rgba(184, 80, 60, 0.18);
+      color: #7a2a1a;
+    }
+    .planning-constraint.pass {
+      background: rgba(60, 130, 90, 0.18);
+      color: #1f4a30;
+    }
+    .planning-rationale {
+      margin-top: 6px;
+      font-size: 0.82rem;
+      color: var(--ink);
+    }
+    .planning-rationale li {
+      margin: 2px 0;
+    }
+    .planning-narrative {
+      margin-top: 6px;
+      padding: 8px 10px;
+      background: rgba(20, 38, 29, 0.04);
+      border-left: 3px solid var(--accent);
+      border-radius: 4px;
+      font-size: 0.82rem;
+      font-style: italic;
+    }
+
     .overlay-list {
       display: flex;
       flex-direction: column;
@@ -820,6 +1048,23 @@
       font-size: 0.78rem;
       color: var(--muted);
       text-align: center;
+      transition: color 0.3s;
+    }
+    .status-bar.is-loading {
+      color: var(--accent-3);
+      font-weight: 600;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .status-spinner {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-right: 5px;
+      vertical-align: middle;
     }
 
     @media (max-width: 980px) {
@@ -892,6 +1137,95 @@
           <div class="panel-card-body" id="agents-panel-body">
             <div class="panel-copy">Run individual analysis agents against the current workspace area.</div>
             <div id="agent-buttons"></div>
+          </div>
+        </div>
+
+        <div class="panel-card is-collapsible" id="planning-panel">
+          <button class="panel-card-header" id="planning-panel-toggle" type="button" aria-expanded="false">
+            <div class="panel-title">Mission Planning</div>
+            <span class="collapse-icon">▾</span>
+          </button>
+          <div class="panel-card-body" id="planning-panel-body">
+            <p class="panel-copy">Enter your force composition and operation type. The planner constraint-matches against ingested data and ranks suitable sites within the loaded area or AOI.</p>
+
+            <div class="plan-row">
+              <label class="plan-label" for="plan-operation">Operation type</label>
+              <select id="plan-operation" class="area-select">
+                <option value="defensive">Defensive</option>
+                <option value="offensive">Offensive</option>
+                <option value="recon">Reconnaissance</option>
+                <option value="screen">Screen</option>
+                <option value="logistics_hub">Logistics Hub</option>
+                <option value="withdrawal">Withdrawal</option>
+              </select>
+            </div>
+
+            <div class="plan-grid-2">
+              <div class="plan-row">
+                <label class="plan-label" for="plan-duration">Duration (h)</label>
+                <input id="plan-duration" type="number" min="1" value="24" />
+              </div>
+              <div class="plan-row">
+                <label class="plan-label" for="plan-grid">Grid res (m)</label>
+                <input id="plan-grid" type="number" min="500" step="500" value="5000" />
+              </div>
+            </div>
+
+            <div class="plan-grid-2">
+              <div class="plan-row">
+                <label class="plan-label" for="plan-topn">Top N sites</label>
+                <input id="plan-topn" type="number" min="1" max="20" value="5" />
+              </div>
+              <div class="plan-row">
+                <label class="plan-label" for="plan-infantry">Infantry</label>
+                <input id="plan-infantry" type="number" min="0" value="120" />
+              </div>
+            </div>
+
+            <div class="plan-grid-2">
+              <div class="plan-row">
+                <label class="plan-label" for="plan-concealment">Concealment priority</label>
+                <select id="plan-concealment" class="area-select">
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+              <div class="plan-row">
+                <label class="plan-label" for="plan-speed">Speed priority</label>
+                <select id="plan-speed" class="area-select">
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="plan-section-title">Vehicles</div>
+            <div id="plan-vehicles" class="plan-asset-list"></div>
+            <button class="btn btn-secondary plan-add-btn" id="plan-add-vehicle" type="button">+ Add vehicle</button>
+
+            <div class="plan-section-title">Drones</div>
+            <div id="plan-drones" class="plan-asset-list"></div>
+            <button class="btn btn-secondary plan-add-btn" id="plan-add-drone" type="button">+ Add drone</button>
+
+            <div class="plan-row plan-checkbox">
+              <input id="plan-column" type="checkbox" checked />
+              <label for="plan-column">Column movement (2 vehicles abreast)</label>
+            </div>
+
+            <div class="plan-row plan-checkbox">
+              <input id="plan-explain" type="checkbox" />
+              <label for="plan-explain">Generate LLM narrative for each site</label>
+            </div>
+
+            <div class="plan-row plan-checkbox">
+              <input id="plan-use-aoi" type="checkbox" />
+              <label for="plan-use-aoi">Restrict to drawn AOI (if set)</label>
+            </div>
+
+            <button class="btn btn-primary plan-run-btn" id="plan-run-btn" type="button">Recommend Sites</button>
+            <div class="plan-status" id="plan-status"></div>
           </div>
         </div>
       </aside>
@@ -975,6 +1309,19 @@
         <div class="section-body">
           <div id="agent-run-display">
             <p class="empty-state">Run an agent from the settings panel to see results here.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="section is-collapsible" data-section>
+        <button class="section-toggle" type="button" aria-expanded="true">
+          <div class="section-header">Mission Planning Results</div>
+          <span class="collapse-icon">▾</span>
+        </button>
+        <div class="section-body">
+          <div id="planning-summary" class="planning-summary"></div>
+          <div id="planning-results">
+            <p class="empty-state">Enter force composition and run the planner from the left sidebar to see ranked site recommendations.</p>
           </div>
         </div>
       </div>
@@ -2392,7 +2739,8 @@
 
       refreshBtn.disabled = true;
       refreshBtn.textContent = "Loading...";
-      statusLine.textContent = "Loading source datasets for the selected area...";
+      statusLine.classList.add("is-loading");
+      statusLine.innerHTML = '<span class="status-spinner"></span>Fetching datasets — this takes 20–30 s on first load…';
       const weatherPickerToggle = document.querySelector('input[data-action="weather-picker"]');
       if (weatherPickerToggle) weatherPickerToggle.checked = false;
       state.map.getContainer().style.cursor = "";
@@ -2416,7 +2764,10 @@
         }
       } catch (error) {
         console.error("Ingest failed:", error);
-        statusLine.textContent = "Workspace refresh failed.";
+        statusLine.classList.remove("is-loading");
+        statusLine.textContent = error.message?.includes("Failed to fetch")
+          ? "Server unreachable — is uvicorn running? (PYTHONPATH=src uvicorn ipb_backend.main:app)"
+          : "Workspace refresh failed.";
       }
 
       try {
@@ -2456,18 +2807,18 @@
           await inspectSelection(state.selectionGeometry);
         } else if (state.sources.length) {
           renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
-          if (!state.sources.some((source) => source.source_id === "nls" && source.status === "disabled")) {
-            statusLine.textContent = state.loadTarget?.kind === "named_area"
-              ? "Datasets ready. Shift + drag on the map to inspect an AOI."
-              : "Custom area loaded. Shift + drag on the map to inspect an AOI inside the loaded rectangle.";
-          }
+          statusLine.textContent = state.loadTarget?.kind === "named_area"
+            ? "Datasets ready. Shift + drag on the map to inspect an AOI."
+            : "Custom area loaded. Shift + drag on the map to inspect an AOI inside the loaded rectangle.";
         }
       } catch (error) {
         console.error(error);
-        if (statusLine.textContent !== "Workspace refresh failed.") {
-          statusLine.textContent = "Could not load workspace data.";
+        statusLine.classList.remove("is-loading");
+        if (!statusLine.textContent.includes("refresh failed")) {
+          statusLine.textContent = "Could not load workspace data. Is the server running?";
         }
       } finally {
+        statusLine.classList.remove("is-loading");
         refreshBtn.disabled = false;
         refreshBtn.textContent = "Load Data";
       }
@@ -2682,6 +3033,371 @@
 
     refreshBtn.addEventListener("click", bootstrapWorkspace);
     clearSelectionBtn.addEventListener("click", clearSelection);
+
+    /* ===== Mission Planning ===== */
+    const VEHICLE_PRESETS = {
+      "BMP-2":        { weight_t: 14.0, width_m: 3.15, height_m: 2.45, length_m: 6.74, off_road_capable: true },
+      "Leopard 2A6":  { weight_t: 62.0, width_m: 3.75, height_m: 3.00, length_m: 9.97, off_road_capable: true },
+      "Patria AMV":   { weight_t: 26.0, width_m: 2.90, height_m: 2.80, length_m: 7.70, off_road_capable: true },
+      "M113 APC":     { weight_t: 12.3, width_m: 2.69, height_m: 2.50, length_m: 4.86, off_road_capable: true },
+      "Truck (6t)":   { weight_t: 6.0,  width_m: 2.50, height_m: 3.00, length_m: 7.50, off_road_capable: false },
+      "Truck (heavy)":{ weight_t: 18.0, width_m: 2.55, height_m: 3.40, length_m: 9.50, off_road_capable: false },
+    };
+    const DRONE_PRESETS = {
+      "Bayraktar TB2": { max_wind_ms: 12.0, max_precip_mm_h: 2.0, range_km: 150, min_visibility_m: 2000 },
+      "DJI Mavic 3":   { max_wind_ms: 12.0, max_precip_mm_h: 0.5, range_km: 15,  min_visibility_m: 1000 },
+      "Switchblade":   { max_wind_ms: 15.0, max_precip_mm_h: 5.0, range_km: 40,  min_visibility_m: 1500 },
+      "Heron TP":      { max_wind_ms: 18.0, max_precip_mm_h: 5.0, range_km: 1000, min_visibility_m: 3000 },
+    };
+
+    const planningState = {
+      vehicles: [{ designation: "BMP-2", count: 4 }],
+      drones: [{ designation: "Bayraktar TB2", count: 2 }],
+      layer: null,
+      lastResponse: null,
+    };
+
+    const planningPanel = document.getElementById("planning-panel");
+    const planningPanelToggle = document.getElementById("planning-panel-toggle");
+    planningPanel.classList.add("is-collapsed");
+    planningPanelToggle.addEventListener("click", () => {
+      planningPanel.classList.toggle("is-collapsed");
+      const expanded = !planningPanel.classList.contains("is-collapsed");
+      planningPanelToggle.setAttribute("aria-expanded", String(expanded));
+    });
+
+    function renderPlanAssetList(containerId, presets, list, kind) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = "";
+      list.forEach((entry, idx) => {
+        const row = document.createElement("div");
+        row.className = "plan-asset-row";
+
+        const select = document.createElement("select");
+        Object.keys(presets).forEach((name) => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          if (name === entry.designation) opt.selected = true;
+          select.appendChild(opt);
+        });
+        select.addEventListener("change", () => {
+          list[idx].designation = select.value;
+          renderPlanAssetList(containerId, presets, list, kind);
+        });
+
+        const count = document.createElement("input");
+        count.type = "number";
+        count.min = "1";
+        count.value = entry.count;
+        count.className = "plan-asset-count";
+        count.addEventListener("change", () => {
+          list[idx].count = parseInt(count.value, 10) || 1;
+        });
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "plan-asset-remove";
+        removeBtn.textContent = "✕";
+        removeBtn.addEventListener("click", () => {
+          list.splice(idx, 1);
+          renderPlanAssetList(containerId, presets, list, kind);
+        });
+
+        const meta = document.createElement("div");
+        meta.className = "plan-asset-meta";
+        const preset = presets[entry.designation];
+        if (preset) {
+          if (kind === "vehicle") {
+            meta.textContent = `${preset.weight_t}t · ${preset.width_m}m wide · ${preset.height_m}m tall`;
+          } else {
+            meta.textContent = `wind ≤ ${preset.max_wind_ms}m/s · precip ≤ ${preset.max_precip_mm_h}mm · ${preset.range_km}km range`;
+          }
+        }
+
+        row.appendChild(select);
+        row.appendChild(count);
+        row.appendChild(removeBtn);
+        row.appendChild(meta);
+        container.appendChild(row);
+      });
+    }
+
+    function renderPlanVehicles() {
+      renderPlanAssetList("plan-vehicles", VEHICLE_PRESETS, planningState.vehicles, "vehicle");
+    }
+    function renderPlanDrones() {
+      renderPlanAssetList("plan-drones", DRONE_PRESETS, planningState.drones, "drone");
+    }
+
+    document.getElementById("plan-add-vehicle").addEventListener("click", () => {
+      planningState.vehicles.push({ designation: "Truck (6t)", count: 1 });
+      renderPlanVehicles();
+    });
+    document.getElementById("plan-add-drone").addEventListener("click", () => {
+      planningState.drones.push({ designation: "DJI Mavic 3", count: 1 });
+      renderPlanDrones();
+    });
+
+    function buildPlanningPayload() {
+      const vehicles = planningState.vehicles.map((v) => {
+        const preset = VEHICLE_PRESETS[v.designation];
+        return {
+          designation: v.designation,
+          count: v.count,
+          weight_t: preset.weight_t,
+          width_m: preset.width_m,
+          height_m: preset.height_m,
+          length_m: preset.length_m,
+          off_road_capable: preset.off_road_capable,
+        };
+      });
+      const drones = planningState.drones.map((d) => {
+        const preset = DRONE_PRESETS[d.designation];
+        return {
+          designation: d.designation,
+          count: d.count,
+          max_wind_ms: preset.max_wind_ms,
+          max_precip_mm_h: preset.max_precip_mm_h,
+          range_km: preset.range_km,
+          min_visibility_m: preset.min_visibility_m,
+        };
+      });
+
+      const useAoi = document.getElementById("plan-use-aoi").checked && state.selectionGeometry;
+      const payload = {
+        area: getWorkspaceArea(),
+        timeframe: state.timeframe,
+        grid_resolution_m: parseInt(document.getElementById("plan-grid").value, 10) || 5000,
+        top_n: parseInt(document.getElementById("plan-topn").value, 10) || 5,
+        force: {
+          infantry: parseInt(document.getElementById("plan-infantry").value, 10) || 0,
+          vehicles,
+          drones,
+          column_movement: document.getElementById("plan-column").checked,
+        },
+        operation: {
+          type: document.getElementById("plan-operation").value,
+          duration_hours: parseInt(document.getElementById("plan-duration").value, 10) || 24,
+          concealment_priority: document.getElementById("plan-concealment").value,
+          speed_priority: document.getElementById("plan-speed").value,
+        },
+        explain: document.getElementById("plan-explain").checked,
+      };
+      if (useAoi) payload.geometry = state.selectionGeometry;
+      return payload;
+    }
+
+    const planRunBtn = document.getElementById("plan-run-btn");
+    const planStatus = document.getElementById("plan-status");
+
+    planRunBtn.addEventListener("click", async () => {
+      const payload = buildPlanningPayload();
+      planRunBtn.disabled = true;
+      planRunBtn.textContent = "Planning...";
+      planStatus.textContent = "Scoring grid cells against your force composition...";
+
+      try {
+        const response = await fetch("/api/planning/recommend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const detail = await response.text();
+          throw new Error(`Planner returned ${response.status}: ${detail}`);
+        }
+        const data = await response.json();
+        planningState.lastResponse = data;
+        renderPlanningResults(data);
+        renderPlanningLayer(data);
+        planStatus.textContent = `${data.feasible_cells}/${data.cells_evaluated} cells feasible. Top ${data.top_sites.length} sites rendered on the map.`;
+      } catch (error) {
+        console.error("Planning failed:", error);
+        planStatus.textContent = `Planning failed: ${error.message || error}`;
+      } finally {
+        planRunBtn.disabled = false;
+        planRunBtn.textContent = "Recommend Sites";
+      }
+    });
+
+    function rankColor(rank, total) {
+      // green for top, yellow mid, red bottom
+      const t = total <= 1 ? 0 : (rank - 1) / (total - 1);
+      const hue = 130 - t * 130; // 130 (green) → 0 (red)
+      return `hsl(${hue}, 65%, 45%)`;
+    }
+
+    function renderPlanningLayer(response) {
+      if (planningState.layer) {
+        state.map.removeLayer(planningState.layer);
+        planningState.layer = null;
+      }
+      const total = response.top_sites.length;
+      if (!total) return;
+
+      const features = response.top_sites.map((site) => ({
+        type: "Feature",
+        geometry: site.geometry,
+        properties: {
+          rank: site.rank,
+          score: site.score,
+          feasible: site.feasible,
+        },
+      }));
+
+      planningState.layer = L.geoJSON({ type: "FeatureCollection", features }, {
+        style: (feat) => {
+          const color = rankColor(feat.properties.rank, total);
+          return {
+            color,
+            weight: feat.properties.feasible ? 3 : 2,
+            opacity: 0.9,
+            fillColor: color,
+            fillOpacity: feat.properties.feasible ? 0.32 : 0.15,
+            dashArray: feat.properties.feasible ? null : "4 4",
+          };
+        },
+        onEachFeature: (feat, layer) => {
+          const p = feat.properties;
+          layer.bindTooltip(`#${p.rank} · score ${p.score.toFixed(2)}${p.feasible ? "" : " · infeasible"}`, { sticky: true });
+          layer.on("click", () => {
+            const card = document.getElementById(`plan-site-${p.rank}`);
+            if (card) {
+              card.scrollIntoView({ behavior: "smooth", block: "center" });
+              card.style.transition = "box-shadow 0.5s ease";
+              card.style.boxShadow = "0 0 0 3px var(--accent)";
+              setTimeout(() => { card.style.boxShadow = ""; }, 1200);
+            }
+          });
+        },
+      }).addTo(state.map);
+
+      // numbered markers at centroids
+      response.top_sites.forEach((site) => {
+        const [lon, lat] = site.centroid;
+        const marker = L.marker([lat, lon], {
+          icon: L.divIcon({
+            className: "planning-marker",
+            html: `<div style="background:${rankColor(site.rank, total)};color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.3);font-size:0.78rem">${site.rank}</div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          }),
+        });
+        marker.addTo(planningState.layer);
+      });
+    }
+
+    function renderPlanningResults(response) {
+      const summary = document.getElementById("planning-summary");
+      summary.innerHTML = "";
+      const stats = [
+        { lbl: "Operation", val: response.operation_type },
+        { lbl: "Cells evaluated", val: response.cells_evaluated },
+        { lbl: "Feasible", val: `${response.feasible_cells} / ${response.cells_evaluated}` },
+        { lbl: "Grid", val: `${response.grid_resolution_m} m` },
+      ];
+      stats.forEach((s) => {
+        const div = document.createElement("div");
+        div.className = "planning-stat";
+        div.innerHTML = `<div class="lbl">${s.lbl}</div><div class="val">${s.val}</div>`;
+        summary.appendChild(div);
+      });
+
+      const container = document.getElementById("planning-results");
+      container.innerHTML = "";
+
+      (response.notes || []).forEach((note) => {
+        const p = document.createElement("p");
+        p.className = "planning-note";
+        p.textContent = "Note: " + note;
+        container.appendChild(p);
+      });
+
+      if (!response.top_sites.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty-state";
+        empty.textContent = "No sites returned.";
+        container.appendChild(empty);
+        return;
+      }
+
+      const total = response.top_sites.length;
+      response.top_sites.forEach((site) => {
+        const card = document.createElement("div");
+        card.id = `plan-site-${site.rank}`;
+        card.className = "planning-site" + (site.feasible ? "" : " is-infeasible");
+
+        const header = document.createElement("div");
+        header.className = "planning-site-header";
+        const rank = document.createElement("div");
+        rank.className = "planning-rank";
+        rank.style.background = rankColor(site.rank, total);
+        rank.textContent = site.rank;
+        const title = document.createElement("div");
+        title.className = "planning-site-title";
+        title.textContent = `Site #${site.rank}` + (site.feasible ? "" : " (infeasible)");
+        const score = document.createElement("div");
+        score.className = "planning-score";
+        score.textContent = site.score.toFixed(2);
+        header.appendChild(rank);
+        header.appendChild(title);
+        header.appendChild(score);
+        card.appendChild(header);
+
+        const breakdown = document.createElement("div");
+        breakdown.className = "planning-breakdown";
+        Object.entries(site.score_breakdown).forEach(([key, val]) => {
+          const bar = document.createElement("div");
+          bar.className = "planning-bar";
+          bar.innerHTML = `<span>${key.replace(/_/g, " ")} · ${val.toFixed(2)}</span><div class="planning-bar-fill"><span style="width:${Math.round(val * 100)}%"></span></div>`;
+          breakdown.appendChild(bar);
+        });
+        card.appendChild(breakdown);
+
+        if (site.constraint_matches && site.constraint_matches.length) {
+          const cons = document.createElement("div");
+          cons.className = "planning-constraints";
+          site.constraint_matches.forEach((m) => {
+            const chip = document.createElement("span");
+            chip.className = "planning-constraint " + (m.passed ? "pass" : "fail");
+            chip.textContent = (m.passed ? "✓ " : "✗ ") + m.name;
+            if (m.detail) chip.title = m.detail;
+            cons.appendChild(chip);
+          });
+          card.appendChild(cons);
+        }
+
+        if (site.rationale && site.rationale.length) {
+          const ul = document.createElement("ul");
+          ul.className = "planning-rationale";
+          site.rationale.forEach((line) => {
+            const li = document.createElement("li");
+            li.textContent = line;
+            ul.appendChild(li);
+          });
+          card.appendChild(ul);
+        }
+
+        if (site.narrative) {
+          const div = document.createElement("div");
+          div.className = "planning-narrative";
+          div.textContent = site.narrative;
+          card.appendChild(div);
+        }
+
+        card.addEventListener("click", () => {
+          const [lon, lat] = site.centroid;
+          state.map.flyTo([lat, lon], Math.max(state.map.getZoom(), 10), { duration: 0.6 });
+        });
+
+        container.appendChild(card);
+      });
+    }
+
+    renderPlanVehicles();
+    renderPlanDrones();
+    /* ===== /Mission Planning ===== */
 
     renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
     bootstrapWorkspace();

@@ -6,7 +6,7 @@ import httpx
 
 from ipb_backend.config import settings
 from ipb_backend.ingestion.base import SourceAdapter
-from ipb_backend.models import DatasetRecord
+from ipb_backend.models import DatasetRecord, LoadTarget
 
 AREA_CENTERS: dict[str, dict[str, float]] = {
     "north karelia": {"lat": 62.8, "lon": 30.2},
@@ -29,7 +29,7 @@ class OpenCellIdAdapter(SourceAdapter):
         normalized = area.lower().strip()
         return AREA_CENTERS.get(normalized, AREA_CENTERS["north karelia"])
 
-    async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
+    async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
         center = self._resolve_center(area)
 
         if not settings.opencellid_api_key:

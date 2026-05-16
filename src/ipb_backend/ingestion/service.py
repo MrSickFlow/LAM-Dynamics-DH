@@ -40,10 +40,7 @@ class IngestionService:
             raise ValueError(f"No adapter configured for source id: {source_id}")
 
         try:
-            if load_target is None:
-                record = await adapter.fetch(area, timeframe)
-            else:
-                record = await adapter.fetch(area, timeframe, load_target)
+            record = await adapter.fetch(area, timeframe, load_target)
             updated_definition = definition.model_copy(
                 update={
                     "status": SourceStatus.READY,
