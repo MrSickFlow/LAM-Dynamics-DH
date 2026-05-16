@@ -173,7 +173,22 @@
     .control-row {
       display: flex;
       gap: 8px;
-      margin-bottom: 8px;
+      width: 100%;
+    }
+
+    .area-select {
+      flex: 1;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.6);
+      font-size: 0.85rem;
+      color: var(--ink);
+      cursor: pointer;
+      outline: none;
+    }
+    .area-select:focus {
+      border-color: var(--accent);
     }
 
     .control-row input {
@@ -697,6 +712,13 @@
           <div class="panel-title">Selection Mode</div>
           <p class="panel-copy">Shift + left-click and hold on the map to draw an area of interest. The right-hand inspector updates from that polygon.</p>
           <div class="control-row">
+            <select id="area-select" class="area-select">
+              <option value="North Karelia">North Karelia</option>
+              <option value="Archipelago Sea">Archipelago Sea</option>
+              <option value="Käsivarren Lappi">Käsivarren Lappi</option>
+            </select>
+          </div>
+          <div class="control-row">
             <input id="timeframe-input" name="timeframe" value="72h" placeholder="Timeframe" />
             <button class="btn btn-primary" id="refresh-btn" type="button">Refresh Data</button>
           </div>
@@ -823,6 +845,7 @@
       selectionGeometry: null,
       latestInspection: null,
       analysisHealth: null,
+      dataCache: {},
       draw: {
         active: false,
         points: [],
@@ -832,6 +855,7 @@
     };
 
     const timeframeInput = document.getElementById("timeframe-input");
+    const areaSelect = document.getElementById("area-select");
     const refreshBtn = document.getElementById("refresh-btn");
     const clearSelectionBtn = document.getElementById("clear-selection-btn");
     const overlayControls = document.getElementById("overlay-controls");
@@ -935,7 +959,7 @@
     ];
 
     const WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites"];
-    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["tieviiva", "rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites"]);
+    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["tieviiva", "rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges"]);
 
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
@@ -2026,6 +2050,13 @@
     });
 
     wirePanelScrolling(document.querySelector(".inspector"));
+
+    areaSelect.addEventListener("change", () => {
+      state.bootstrapArea = areaSelect.value;
+      state.map.setView(getCenter(state.bootstrapArea), 9);
+      clearSelection();
+      bootstrapWorkspace();
+    });
 
     refreshBtn.addEventListener("click", bootstrapWorkspace);
     clearSelectionBtn.addEventListener("click", clearSelection);

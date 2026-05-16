@@ -35,6 +35,7 @@ from ipb_backend.models import (
     UiLayer,
     UiPlaceholderResponse,
 )
+from ipb_backend.ingestion.sources.osm_poi import _load_static_pois as _load_static_osm_pois
 from ipb_backend.spatial import clip_geojson_feature, geojson_to_shape, polygon_area_sqkm
 
 router = APIRouter()
@@ -527,9 +528,15 @@ async def map_data_opencellid(area: str = Query("North Karelia"), services=Depen
 async def map_data_osm_poi(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
     record = next((r for r in records if r.source_id == "osm-poi" and r.area == area), None)
-    if record is None:
+    categories = None
+    if record is not None:
+        categories = record.data.get("categories", {})
+    else:
+        static = _load_static_osm_pois(area)
+        if static:
+            categories = static
+    if not categories:
         return {"type": "FeatureCollection", "features": [], "available": False}
-    categories = record.data.get("categories", {})
     features = []
     for cat_id, items in categories.items():
         label = cat_id.replace("_", " ").title()
