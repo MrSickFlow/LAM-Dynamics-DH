@@ -47,7 +47,13 @@ from ipb_backend.planning import (
     recommend_sites,
 )
 from ipb_backend.planning.explainer import enrich_with_narratives
-from ipb_backend.spatial import clip_geojson_feature, geojson_to_shape, polygon_area_sqkm
+from ipb_backend.spatial import (
+    clip_geojson_feature,
+    filter_features_by_bbox,
+    geojson_to_shape,
+    parse_bbox_param,
+    polygon_area_sqkm,
+)
 
 router = APIRouter()
 UI_PLACEHOLDER_PATH = Path(__file__).resolve().parents[1] / "ui_placeholder.html"
@@ -385,20 +391,26 @@ def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[s
     elif mask.geom_type != "Polygon":
         raise HTTPException(status_code=400, detail="AOI geometry must be a Polygon or MultiPolygon")
 
-    latest_records = _latest_records_by_source(services["ingestion_service"].records)
-    raw_data: dict[str, Any] = {}
+    all_records = services["ingestion_service"].records
     source_names = {
         definition.source_id: definition.name
         for definition in services["registry"].list_sources()
     }
 
-    for record in latest_records.values():
-        raw_data[record.source_id] = _clip_record_for_aoi(
+    raw_data: dict[str, Any] = {}
+    for source_id in source_names:
+        record = _record_for_area_or_latest(all_records, source_id, request.area or None)
+        if record is None:
+            record = _record_for_area_or_latest(all_records, source_id)
+        if record is None:
+            continue
+        raw_data[source_id] = _clip_record_for_aoi(
             record,
             mask,
-            source_name=source_names.get(record.source_id),
+            source_name=source_names[source_id],
         )
 
+    latest_records = _latest_records_by_source(all_records)
     selection = {
         "geometry": request.geometry,
         "bounds": list(mask.bounds),
@@ -520,7 +532,11 @@ async def map_layers():
 
 
 @router.get("/map-data/nls")
-async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_services)):
+async def map_data_nls(
+    area: str = Query("North Karelia"),
+    bbox: str | None = Query(None, description="WGS84 viewport filter: west,south,east,north"),
+    services=Depends(get_services),
+):
     records = services["ingestion_service"].records
     nls_record = _record_for_area_or_latest(records, "nls", area)
     if nls_record is None:
@@ -543,6 +559,7 @@ async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_
                     "geometry": sample["geometry"],
                     "properties": props,
                 })
+    features = filter_features_by_bbox(features, parse_bbox_param(bbox))
     payload = {"type": "FeatureCollection", "features": features, "available": True}
     if is_demo_fallback:
         payload["reason"] = "demo-fallback"
@@ -551,34 +568,69 @@ async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_
 
 
 @router.get("/map-data/digiroad")
-async def map_data_digiroad(area: str = Query("North Karelia"), services=Depends(get_services)):
+async def map_data_digiroad(
+    area: str = Query("North Karelia"),
+    bbox: str | None = Query(None, description="WGS84 viewport filter: west,south,east,north"),
+    services=Depends(get_services),
+):
     records = services["ingestion_service"].records
     record = _record_for_area_or_latest(records, "digiroad", area)
     if record is None:
         return {"type": "FeatureCollection", "features": [], "available": False}
-    bridge_coll_id = "dr_tielinkki_silta_alikulku_tunneli"
     collections = record.data.get("collections", {})
-    bridge_data = collections.get(bridge_coll_id, {})
-    label = bridge_data.get("label", "Bridges, underpasses, tunnels")
+
+    # Build lookup tables: tielinkki_id -> restriction value for each limit collection
+    def _build_limit_index(coll_id: str, value_key: str) -> dict[str, Any]:
+        index: dict[str, Any] = {}
+        for feat in collections.get(coll_id, {}).get("features", []):
+            props = feat.get("properties") or {}
+            link_id = props.get("tielinkki_id")
+            if link_id is not None:
+                index[str(link_id)] = props.get(value_key)
+        return index
+
+    mass_index = _build_limit_index("dr_max_massa", "massarajoitus")
+    height_index = _build_limit_index("dr_max_korkeus", "korkeus")
+    width_index = _build_limit_index("dr_max_leveys", "leveys")
+    axle_index = _build_limit_index("dr_max_akselimassa", "akselimassarajoitus")
+
+    SILTA_ALIK_LABEL = {1: "Bridge", 2: "Underpass", 3: "Tunnel"}
+    SILTA_ALIK_COLLECTION = {1: "bridges", 2: "bridges", 3: "tunnels"}
+    bridge_data = collections.get("dr_tielinkki_silta_alikulku_tunneli", {})
     features = []
     for sample in bridge_data.get("features", []):
-        silta_alik = (sample.get("properties") or {}).get("silta_alik")
+        props = sample.get("properties") or {}
+        silta_alik = props.get("silta_alik")
         if silta_alik not in (1, 2, 3):
             continue
-        if "geometry" in sample and sample["geometry"]:
-            props = dict(sample.get("properties", {}))
-            props["_collection"] = "bridges"
-            props["_label"] = label
-            features.append({
-                "type": "Feature",
-                "geometry": sample["geometry"],
-                "properties": props,
-            })
-    return {"type": "FeatureCollection", "features": features, "available": True, "message": f"{len(features)} bridge/tunnel features"}
+        if "geometry" not in sample or not sample["geometry"]:
+            continue
+        link_id = str(props.get("tielinkki_id", ""))
+        coll = SILTA_ALIK_COLLECTION[silta_alik]
+        enriched = dict(props)
+        enriched["_collection"] = coll
+        enriched["_label"] = SILTA_ALIK_LABEL[silta_alik]
+        enriched["structure_type"] = SILTA_ALIK_LABEL[silta_alik]
+        enriched["max_mass_t"] = mass_index.get(link_id)
+        enriched["max_height_m"] = height_index.get(link_id)
+        enriched["max_width_m"] = width_index.get(link_id)
+        enriched["max_axle_mass_t"] = axle_index.get(link_id)
+        features.append({
+            "type": "Feature",
+            "geometry": sample["geometry"],
+            "properties": enriched,
+        })
+    n_bridges = sum(1 for f in features if f["properties"]["_collection"] == "bridges")
+    n_tunnels = len(features) - n_bridges
+    return {"type": "FeatureCollection", "features": features, "available": True, "message": f"{n_bridges} bridges/underpasses, {n_tunnels} tunnels"}
 
 
 @router.get("/map-data/opencellid")
-async def map_data_opencellid(area: str = Query("North Karelia"), services=Depends(get_services)):
+async def map_data_opencellid(
+    area: str = Query("North Karelia"),
+    bbox: str | None = Query(None, description="WGS84 viewport filter: west,south,east,north"),
+    services=Depends(get_services),
+):
     records = services["ingestion_service"].records
     record = _record_for_area_or_latest(records, "opencellid", area)
     if record is None:
@@ -605,11 +657,16 @@ async def map_data_opencellid(area: str = Query("North Karelia"), services=Depen
                 "range": cell.get("range", ""),
             },
         })
+    features = filter_features_by_bbox(features, parse_bbox_param(bbox))
     return {"type": "FeatureCollection", "features": features, "available": True}
 
 
 @router.get("/map-data/osm-poi")
-async def map_data_osm_poi(area: str = Query("North Karelia"), services=Depends(get_services)):
+async def map_data_osm_poi(
+    area: str = Query("North Karelia"),
+    bbox: str | None = Query(None, description="WGS84 viewport filter: west,south,east,north"),
+    services=Depends(get_services),
+):
     records = services["ingestion_service"].records
     record = _record_for_area_or_latest(records, "osm-poi", area)
     categories = record.data.get("categories", {}) if record is not None else None
@@ -634,6 +691,7 @@ async def map_data_osm_poi(area: str = Query("North Karelia"), services=Depends(
                     "amenity": tags.get("amenity", ""),
                 },
             })
+    features = filter_features_by_bbox(features, parse_bbox_param(bbox))
     return {"type": "FeatureCollection", "features": features, "available": True}
 
 
@@ -670,6 +728,32 @@ async def map_data_satellites(area: str = Query("North Karelia"), services=Depen
         "available": True,
         "message": f"Tracking {len(features)} reconnaissance/imaging satellites",
     }
+
+
+@router.get("/map-data/road-surface")
+async def map_data_road_surface(
+    area: str = Query("North Karelia"),
+    bbox: str | None = Query(None, description="WGS84 viewport filter: west,south,east,north"),
+    services=Depends(get_services),
+):
+    records = services["ingestion_service"].records
+    record = _record_for_area_or_latest(records, "digitraffic-road-surface", area)
+    if record is None:
+        return {"type": "FeatureCollection", "features": [], "available": False}
+    raw_features = record.data.get("features", [])
+    features = []
+    for f in raw_features:
+        props = dict(f.get("properties", {}))
+        props["_collection"] = "road-surface"
+        props["_label"] = "Road Surface Station"
+        features.append({
+            "type": "Feature",
+            "geometry": f.get("geometry"),
+            "properties": props,
+        })
+    features = filter_features_by_bbox(features, parse_bbox_param(bbox))
+    return {"type": "FeatureCollection", "features": features, "available": True,
+            "message": f"{len(features)} road surface stations"}
 
 
 @router.get("/weather/point")

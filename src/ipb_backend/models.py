@@ -78,6 +78,7 @@ class AoiInspectionRequest(BaseModel):
     geometry: dict[str, Any]
     timeframe: Optional[str] = None
     profile: AnalysisProfile = AnalysisProfile.GENERAL
+    area: Optional[str] = None
 
 
 class AoiInspectionResponse(BaseModel):

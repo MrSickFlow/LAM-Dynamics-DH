@@ -1418,6 +1418,10 @@
       { id: "poi-transport", label: "Transport", color: "#c46c32" },
       { id: "poi-industry", label: "Industry", color: "#5a6a61" },
       { id: "poi-forest", label: "Forest", color: "#2a8a5c" },
+      { id: "poi-military", label: "Military Zones", color: "#8b1a1a" },
+      { id: "poi-airfields", label: "Airfields & Helipads", color: "#888" },
+      { id: "poi-fuel_supply", label: "Fuel & Supply Points", color: "#c4a832" },
+      { id: "poi-power_infrastructure", label: "Power Infrastructure", color: "#f0a500" },
     ];
 
     const CELL_TOWER_COLLECTIONS = [
@@ -1429,10 +1433,15 @@
     ];
 
     const BRIDGE_COLLECTIONS = [
-      { id: "bridges", label: "Bridges & Tunnels", color: "#c46c32" },
+      { id: "bridges", label: "Bridges & Underpasses", color: "#c46c32" },
+      { id: "tunnels", label: "Tunnels", color: "#8b4513" },
     ];
 
-    const ALL_OVERLAY_COLLECTIONS = [...NLS_COLLECTIONS, ...POI_COLLECTIONS, ...CELL_TOWER_COLLECTIONS, ...SATELLITE_COLLECTIONS, ...BRIDGE_COLLECTIONS];
+    const ROAD_SURFACE_COLLECTIONS = [
+      { id: "road-surface", label: "Road Surface Stations", color: "#c4a832" },
+    ];
+
+    const ALL_OVERLAY_COLLECTIONS = [...NLS_COLLECTIONS, ...POI_COLLECTIONS, ...CELL_TOWER_COLLECTIONS, ...SATELLITE_COLLECTIONS, ...BRIDGE_COLLECTIONS, ...ROAD_SURFACE_COLLECTIONS];
 
     const OVERLAY_CATEGORIES = [
       {
@@ -1441,19 +1450,19 @@
       },
       {
         name: "Infrastructure",
-        ids: ["tieviiva", "rakennus", "rautatie", "sahkolinja", "bridges", "taajaanrakennettualue", "lentokenttaalue", "satamaalue", "rautatieliikennepaikka", "osoitepiste"],
+        ids: ["rakennus", "rautatie", "sahkolinja", "bridges", "tunnels", "taajaanrakennettualue", "lentokenttaalue", "satamaalue", "rautatieliikennepaikka", "osoitepiste", "road-surface", "tieviiva"],
       },
       {
         name: "Boundaries & Places",
         ids: ["kunta", "kunnanhallintoraja", "luonnonsuojelualue", "paikannimi"],
       },
       {
-        name: "Communications",
-        ids: ["celltowers"],
+        name: "Operational Factors",
+        ids: ["poi-military", "poi-airfields", "poi-fuel_supply", "poi-power_infrastructure", "celltowers"],
       },
       {
-        name: "Points of Interest",
-        ids: ["poi-education", "poi-healthcare", "poi-water_sources", "poi-religion", "poi-emergency_services", "poi-government", "poi-transport", "poi-industry", "poi-forest"],
+        name: "Civilian & Logistics",
+        ids: ["poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-transport", "poi-industry", "poi-forest", "poi-religion"],
       },
       {
         name: "Satellites",
@@ -1466,9 +1475,9 @@
       },
     ];
 
-    const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites"];
-  const CUSTOM_LOAD_SOURCE_IDS = ["nls", "statistics-finland", "digiroad", "osm-poi"];
-    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["tieviiva", "rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges"]);
+    const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites", "digitraffic-road-surface"];
+    const CUSTOM_LOAD_SOURCE_IDS = ["nls", "statistics-finland", "digiroad", "osm-poi"];
+    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-transport", "poi-industry", "poi-forest", "poi-religion"]);
 
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
@@ -1501,9 +1510,15 @@
       "poi-transport": { point: true, color: "#c46c32" },
       "poi-industry": { point: true, color: "#5a6a61" },
       "poi-forest": { point: true, color: "#2a8a5c" },
+      "poi-military": { point: true, color: "#8b1a1a" },
+      "poi-airfields": { point: true, color: "#555" },
+      "poi-fuel_supply": { point: true, color: "#c4a832" },
+      "poi-power_infrastructure": { point: true, color: "#f0a500" },
       celltowers: { point: true, color: "#888" },
       satellites: { point: true, color: "#195d85" },
       bridges: { color: "#c46c32", weight: 2.5, fill: false },
+      tunnels: { color: "#8b4513", weight: 2.5, fill: false, dashArray: "8,4" },
+      "road-surface": { point: true, color: "#c4a832" },
     };
 
     function getCenter(area) {
@@ -1595,6 +1610,25 @@
       return [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
     }
 
+    function viewportBboxParam() {
+      if (!state.map) return "";
+      return currentMapBbox().join(",");
+    }
+
+    let viewportReloadTimer = null;
+    function scheduleViewportReload() {
+      if (!state.sources || state.sources.length === 0) return;
+      clearTimeout(viewportReloadTimer);
+      viewportReloadTimer = setTimeout(() => {
+        const sourceIds = new Set(currentSourceIds());
+        const jobs = [];
+        // NLS, POI, and bridges load the full area at workspace load — no viewport refetch needed.
+        if (sourceIds.has("opencellid")) jobs.push(loadCellTowerMapData());
+        if (sourceIds.has("digitraffic-road-surface")) jobs.push(loadRoadSurfaceMapData());
+        Promise.all(jobs).catch((err) => console.error("Viewport reload failed:", err));
+      }, 400);
+    }
+
     function initMap() {
       state.map = L.map("map", {
         zoomControl: true,
@@ -1618,10 +1652,39 @@
           }),
           onEachFeature: (feature, layerRef) => {
             const props = feature.properties || {};
-            const name = props.nimi || props.namn || props.name || "";
-            const extra = props.radio ? `<br>Radio: ${props.radio}` : "";
-            const pass = props.next_pass ? `<br>Next pass: ${props.next_pass}` : "";
-            layerRef.bindPopup(`<b>${collection.label}</b>${name ? `<br>${name}` : ""}${extra}${pass}`);
+            const name = props.nimi || props.namn || props.name || props["name:fi"] || "";
+            let details = "";
+            if (collection.id === "bridges" || collection.id === "tunnels") {
+              const type = props.structure_type || "";
+              const mass = props.max_mass_t != null ? `${props.max_mass_t} t` : "—";
+              const height = props.max_height_m != null ? `${props.max_height_m} m` : "—";
+              const width = props.max_width_m != null ? `${props.max_width_m} m` : "—";
+              const axle = props.max_axle_mass_t != null ? `${props.max_axle_mass_t} t` : "—";
+              const road = props.tienimi_su || props.tienimi_ru || "";
+              details = (road ? `<br><small>${road}</small>` : "")
+                + `<br><small>Type: ${type}</small>`
+                + `<br><small>Max mass: <b>${mass}</b> | Axle: <b>${axle}</b></small>`
+                + `<br><small>Max height: <b>${height}</b> | Width: <b>${width}</b></small>`;
+            } else if (collection.id === "road-surface") {
+              const cond = props.road_condition_value ?? props.road_condition ?? "";
+              const temp = props.air_temperature ?? props.temperature ?? "";
+              details = (cond ? `<br>Condition: ${cond}` : "") + (temp ? `<br>Air temp: ${temp}°C` : "");
+            } else if (collection.id === "poi-military") {
+              const mil = props.military || props.landuse || "";
+              details = mil ? `<br>Type: ${mil}` : "";
+            } else if (collection.id === "poi-airfields") {
+              const type = props.aeroway || "";
+              const icao = props.icao || "";
+              details = (type ? `<br>Type: ${type}` : "") + (icao ? `<br>ICAO: ${icao}` : "");
+            } else if (collection.id === "poi-power_infrastructure") {
+              const ptype = props.power || "";
+              const voltage = props.voltage || "";
+              details = (ptype ? `<br>Type: ${ptype}` : "") + (voltage ? `<br>Voltage: ${voltage}` : "");
+            } else {
+              if (props.radio) details += `<br>Radio: ${props.radio}`;
+              if (props.next_pass) details += `<br>Next pass: ${props.next_pass}`;
+            }
+            layerRef.bindPopup(`<b>${collection.label}</b>${name ? `<br>${name}` : ""}${details}`);
           },
         });
         state.collectionLayers[collection.id] = layer;
@@ -1633,6 +1696,8 @@
 
       initFreehandSelection();
       syncLoadTargetLabel();
+
+      state.map.on("moveend zoomend", scheduleViewportReload);
     }
 
     function initFreehandSelection() {
@@ -1951,7 +2016,7 @@
       try {
         const response = await fetch(`/api/map-data/nls?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
-        Object.values(state.collectionLayers).forEach((layer) => layer.clearLayers());
+        NLS_COLLECTIONS.forEach((c) => state.collectionLayers[c.id]?.clearLayers());
 
         if (geojson.available === false) {
           const message = geojson.message || "NLS vector overlays are unavailable.";
@@ -2019,7 +2084,7 @@
 
     async function loadCellTowerMapData() {
       try {
-        const response = await fetch(`/api/map-data/opencellid?area=${encodeURIComponent(getWorkspaceArea())}`);
+        const response = await fetch(`/api/map-data/opencellid?area=${encodeURIComponent(getWorkspaceArea())}&bbox=${encodeURIComponent(viewportBboxParam())}`);
         const geojson = await response.json();
         state.collectionLayers["celltowers"]?.clearLayers();
         if (geojson.available === false) {
@@ -2059,18 +2124,46 @@
       try {
         const response = await fetch(`/api/map-data/digiroad?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
-        state.collectionLayers["bridges"]?.clearLayers();
+        BRIDGE_COLLECTIONS.forEach((c) => state.collectionLayers[c.id]?.clearLayers());
         if (geojson.available === false) {
-          setLayerAvailability(["bridges"], false, "Bridge data unavailable.");
+          setLayerAvailability(["bridges", "tunnels"], false, "Bridge data unavailable.");
           return;
         }
-        setLayerAvailability(["bridges"], true);
-        state.collectionLayers["bridges"]?.addData(geojson);
-        const checkbox = document.querySelector('input[data-collection="bridges"]');
-        if (!checkbox || checkbox.checked) state.collectionLayers["bridges"]?.addTo(state.map);
+        setLayerAvailability(["bridges", "tunnels"], true);
+        const grouped = { bridges: [], tunnels: [] };
+        (geojson.features || []).forEach((f) => {
+          const coll = f.properties?._collection;
+          if (coll in grouped) grouped[coll].push(f);
+        });
+        Object.entries(grouped).forEach(([coll, features]) => {
+          const layer = state.collectionLayers[coll];
+          if (!layer) return;
+          layer.addData({ type: "FeatureCollection", features });
+          const checkbox = document.querySelector(`input[data-collection="${coll}"]`);
+          if (!checkbox || checkbox.checked) layer.addTo(state.map);
+        });
       } catch (error) {
         console.error("Bridge map data load failed:", error);
-        setLayerAvailability(["bridges"], false, "Bridge overlays could not be refreshed.");
+        setLayerAvailability(["bridges", "tunnels"], false, "Bridge overlays could not be refreshed.");
+      }
+    }
+
+    async function loadRoadSurfaceMapData() {
+      try {
+        const response = await fetch(`/api/map-data/road-surface?area=${encodeURIComponent(getWorkspaceArea())}&bbox=${encodeURIComponent(viewportBboxParam())}`);
+        const geojson = await response.json();
+        state.collectionLayers["road-surface"]?.clearLayers();
+        if (geojson.available === false) {
+          setLayerAvailability(["road-surface"], false, "Road surface data unavailable.");
+          return;
+        }
+        setLayerAvailability(["road-surface"], true);
+        state.collectionLayers["road-surface"]?.addData(geojson);
+        const checkbox = document.querySelector('input[data-collection="road-surface"]');
+        if (!checkbox || checkbox.checked) state.collectionLayers["road-surface"]?.addTo(state.map);
+      } catch (error) {
+        console.error("Road surface map data load failed:", error);
+        setLayerAvailability(["road-surface"], false, "Road surface overlays could not be refreshed.");
       }
     }
 
@@ -2679,7 +2772,7 @@
         const response = await fetch("/api/aoi/inspect", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ geometry, timeframe: state.timeframe, profile: analysisProfile.value || "general" }),
+          body: JSON.stringify({ geometry, timeframe: state.timeframe, profile: analysisProfile.value || "general", area: getWorkspaceArea() }),
         });
         if (!response.ok) {
           throw new Error(`AOI inspection failed with ${response.status}`);
@@ -2767,6 +2860,7 @@
         if (sourceIds.has("opencellid")) loaders.push(loadCellTowerMapData());
         if (sourceIds.has("satellites")) loaders.push(loadSatelliteMapData());
         if (sourceIds.has("digiroad")) loaders.push(loadBridgeMapData());
+        if (sourceIds.has("digitraffic-road-surface")) loaders.push(loadRoadSurfaceMapData());
         await Promise.all(loaders);
 
         if (state.selectionGeometry) {

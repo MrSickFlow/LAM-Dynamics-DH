@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
-import unicodedata
 from typing import Any
 
 import httpx
@@ -14,14 +12,6 @@ from ipb_backend.spatial import format_bbox, resolve_load_target_bbox, resolve_l
 
 class DigiroadAdapter(SourceAdapter):
     BASE_URL = "https://avoinapi.vaylapilvi.fi/vaylatiedot/digiroad/ogc/features/v1"
-
-    AREA_BBOXES: dict[str, tuple[float, float, float, float]] = {
-        "archipelago sea": (21.0, 59.7, 23.0, 60.6),
-        "north karelia": (29.0, 62.0, 31.5, 63.5),
-        "lapland": (20.5, 68.5, 22.5, 69.4),
-        "lapland (kasivarren lappi)": (20.5, 68.5, 22.5, 69.4),
-        "kasivarren lappi": (20.5, 68.5, 22.5, 69.4),
-    }
 
     COLLECTIONS: dict[str, str] = {
         "dr_nopeusrajoitus": "Speed limits",
@@ -61,10 +51,6 @@ class DigiroadAdapter(SourceAdapter):
             for collection_id, payload in list(collection_data.items())[:3]
         )
         raise ValueError(f"Digiroad fetch failed for all collections ({error_summary})")
-
-    def _resolve_bbox(self, area: str) -> tuple[float, float, float, float]:
-        normalized = self._normalize_area(area)
-        return self.AREA_BBOXES.get(normalized, self.AREA_BBOXES["north karelia"])
 
     async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
         bbox = resolve_load_target_bbox(area, load_target)
@@ -139,7 +125,3 @@ class DigiroadAdapter(SourceAdapter):
                 labels.append(f"{label}: {matched}")
         parts = ", ".join(labels)
         return f"Digiroad road data for {area}: {parts} ({total} total features)"
-
-    def _normalize_area(self, area: str) -> str:
-        ascii_area = unicodedata.normalize("NFKD", area).encode("ascii", "ignore").decode("ascii")
-        return re.sub(r"\s+", " ", ascii_area).strip().lower()

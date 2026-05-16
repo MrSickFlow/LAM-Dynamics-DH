@@ -14,6 +14,7 @@ from ipb_backend.ingestion.sources.fmi import FmiAdapter
 from ipb_backend.ingestion.sources.nls import NationalLandSurveyAdapter
 from ipb_backend.ingestion.sources.opencellid import OpenCellIdAdapter
 from ipb_backend.ingestion.sources.osm_poi import OsmPoiAdapter
+from ipb_backend.ingestion.sources.road_surface import RoadSurfaceAdapter
 from ipb_backend.ingestion.sources.satellites import SatelliteTleAdapter
 from ipb_backend.ingestion.sources.statistics_finland import StatisticsFinlandAdapter
 from ipb_backend.models import SourceCategory, SourceDefinition, SourceStatus
@@ -89,6 +90,13 @@ def build_registry() -> SourceRegistry:
                 description="TLE orbital data for reconnaissance and imaging satellites.",
                 refresh_interval_seconds=43200,
             ),
+            SourceDefinition(
+                source_id="digitraffic-road-surface",
+                name="Fintraffic Road Surface Conditions",
+                category=SourceCategory.INFRASTRUCTURE,
+                description="Real-time road surface and weather station conditions from Fintraffic.",
+                refresh_interval_seconds=600,
+            ),
         ]
     )
 
@@ -103,6 +111,7 @@ def build_services():
         "opencellid": OpenCellIdAdapter(registry.get("opencellid")),
         "osm-poi": OsmPoiAdapter(registry.get("osm-poi")),
         "satellites": SatelliteTleAdapter(registry.get("satellites")),
+        "digitraffic-road-surface": RoadSurfaceAdapter(registry.get("digitraffic-road-surface")),
     }
     ingestion_service = IngestionService(registry=registry, adapters=adapters)
     scheduler = RefreshScheduler(ingestion_service=ingestion_service)

@@ -12,12 +12,15 @@ from shapely.geometry.base import BaseGeometry
 from ipb_backend.models import LoadTarget, LoadTargetKind
 
 
+FINLAND_BBOX: tuple[float, float, float, float] = (19.0, 59.5, 31.6, 70.1)
+
 AREA_BBOXES: dict[str, tuple[float, float, float, float]] = {
-    "archipelago sea": (21.0, 59.7, 23.0, 60.6),
-    "north karelia": (29.0, 62.0, 31.5, 63.5),
-    "lapland": (20.5, 68.5, 22.5, 69.4),
-    "lapland (kasivarren lappi)": (20.5, 68.5, 22.5, 69.4),
-    "kasivarren lappi": (20.5, 68.5, 22.5, 69.4),
+    "archipelago sea": (20.5, 59.6, 23.5, 60.8),
+    "north karelia": (28.0, 62.0, 31.6, 64.2),
+    "lapland": (20.0, 65.5, 30.0, 70.1),
+    "lapland (kasivarren lappi)": (20.0, 67.5, 24.0, 69.5),
+    "kasivarren lappi": (20.0, 67.5, 24.0, 69.5),
+    "finland": FINLAND_BBOX,
 }
 
 
@@ -27,7 +30,55 @@ def normalize_area_name(area: str) -> str:
 
 
 def resolve_area_bbox(area: str) -> tuple[float, float, float, float]:
-    return AREA_BBOXES.get(normalize_area_name(area), AREA_BBOXES["north karelia"])
+    return AREA_BBOXES.get(normalize_area_name(area), FINLAND_BBOX)
+
+
+def parse_bbox_param(raw: Optional[str]) -> Optional[tuple[float, float, float, float]]:
+    if not raw:
+        return None
+    parts = raw.split(",")
+    if len(parts) != 4:
+        return None
+    try:
+        west, south, east, north = (float(p) for p in parts)
+    except ValueError:
+        return None
+    if not (-180.0 <= west < east <= 180.0 and -90.0 <= south < north <= 90.0):
+        return None
+    return (west, south, east, north)
+
+
+def point_in_bbox(coords: list[float] | tuple[float, float], bbox: tuple[float, float, float, float]) -> bool:
+    if not coords or len(coords) < 2:
+        return False
+    lon, lat = float(coords[0]), float(coords[1])
+    west, south, east, north = bbox
+    return west <= lon <= east and south <= lat <= north
+
+
+def _bboxes_overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
+
+
+def feature_intersects_bbox(feature: dict[str, Any], bbox: tuple[float, float, float, float]) -> bool:
+    geometry = feature.get("geometry")
+    if not geometry:
+        return False
+    if geometry.get("type") == "Point":
+        return point_in_bbox(geometry.get("coordinates") or [], bbox)
+    try:
+        return _bboxes_overlap(geometry_bounds(geometry), bbox)
+    except Exception:
+        return False
+
+
+def filter_features_by_bbox(
+    features: list[dict[str, Any]],
+    bbox: Optional[tuple[float, float, float, float]],
+) -> list[dict[str, Any]]:
+    if bbox is None:
+        return features
+    return [f for f in features if feature_intersects_bbox(f, bbox)]
 
 
 def geometry_bounds(geometry: dict[str, Any]) -> tuple[float, float, float, float]:

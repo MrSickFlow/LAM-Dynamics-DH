@@ -27,7 +27,7 @@ class RoadSurfaceAdapter(SourceAdapter):
 
     API_BASE_URL = "https://tie.digitraffic.fi/api"
 
-    async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
+    async def fetch(self, area: str, timeframe: str, load_target=None) -> DatasetRecord:
         """
         Fetches road surface condition data for a given area.
         The timeframe is ignored as the API provides the latest data.
@@ -66,10 +66,11 @@ class RoadSurfaceAdapter(SourceAdapter):
             if not station_data:
                 continue
 
+            props_meta = station_meta.get("properties") or {}
             properties = {
                 "station_id": station_id,
-                "name": station_meta["properties"]["name"],
-                "road_station_id": station_meta["properties"]["roadStationId"],
+                "name": props_meta.get("name", ""),
+                "road_station_id": props_meta.get("roadStationId"),
                 "data_updated_time": station_data.get("dataUpdatedTime"),
             }
 
