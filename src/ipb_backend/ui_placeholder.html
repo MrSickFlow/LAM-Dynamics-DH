@@ -1,988 +1,379 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>IPB Operations Workspace</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <style>
-      :root {
-        --bg: #d7e0db;
-        --panel: rgba(246, 242, 233, 0.88);
-        --panel-strong: rgba(243, 237, 225, 0.95);
-        --ink: #14261d;
-        --muted: #5a6a61;
-        --accent: #215347;
-        --accent-2: #c46c32;
-        --accent-3: #195d85;
-        --line: rgba(20, 38, 29, 0.12);
-        --shadow: 0 18px 48px rgba(20, 38, 29, 0.12);
-      }
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IPB Operations Workspace</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root {
+      --ink: #14261d;
+      --muted: #5a6a61;
+      --accent: #215347;
+      --accent-2: #c46c32;
+      --accent-3: #195d85;
+      --line: rgba(20, 38, 29, 0.1);
+      --surface: rgba(246, 242, 233, 0.92);
+      --bg: #d7e0db;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; height: 100vh; overflow: hidden;
+      font-family: "Segoe UI", -apple-system, sans-serif;
+      color: var(--ink); background: var(--bg);
+    }
+    .app {
+      display: flex; height: 100vh;
+    }
 
-      * {
-        box-sizing: border-box;
-      }
+    /* Map */
+    .map-panel {
+      flex: 2; min-width: 0; position: relative;
+    }
+    #map {
+      width: 100%; height: 100%;
+    }
+    .map-watermark {
+      position: absolute; bottom: 20px; left: 20px;
+      background: rgba(246,242,233,0.85); backdrop-filter: blur(6px);
+      padding: 8px 14px; border-radius: 12px; font-size: 0.8rem; z-index: 1000;
+      border: 1px solid var(--line); pointer-events: none;
+    }
 
-      body {
-        margin: 0;
-        min-height: 100vh;
-        font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", sans-serif;
-        color: var(--ink);
-        background:
-          radial-gradient(circle at top left, rgba(196, 108, 50, 0.18), transparent 24%),
-          radial-gradient(circle at 85% 15%, rgba(25, 93, 133, 0.14), transparent 20%),
-          linear-gradient(160deg, #ced9d2, var(--bg));
-      }
+    /* Sidebar */
+    .sidebar {
+      flex: 0 0 380px; overflow-y: auto; padding: 18px 16px;
+      background: var(--surface); backdrop-filter: blur(10px);
+      border-left: 1px solid var(--line);
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 
-      button,
-      input {
-        font: inherit;
-      }
+    .section {
+      border-radius: 18px; border: 1px solid var(--line);
+      background: rgba(255,255,255,0.5); overflow: hidden;
+    }
+    .section-header {
+      padding: 14px 16px 0;
+      font-size: 0.72rem; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--muted); font-weight: 600;
+    }
+    .section-body { padding: 12px 16px 16px; }
 
-      h1,
-      h2,
-      h3 {
-        font-family: "Bahnschrift", "Aptos Narrow", "Franklin Gothic Medium", sans-serif;
-        letter-spacing: 0.01em;
-      }
+    /* Nav */
+    .nav-row {
+      display: flex; gap: 6px; flex-wrap: wrap;
+    }
+    .nav-item {
+      flex: 1; min-width: 70px; padding: 10px 8px; text-align: center;
+      border-radius: 12px; border: 1px solid var(--line);
+      background: rgba(255,255,255,0.6); cursor: pointer;
+      font-size: 0.82rem; transition: all 140ms; text-decoration: none; color: var(--ink);
+    }
+    .nav-item:hover { border-color: var(--accent); background: rgba(33,83,71,0.08); }
+    .nav-item.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .nav-item .nav-icon { font-size: 1.2rem; display: block; margin-bottom: 2px; }
 
-      p {
-        margin: 0;
-        line-height: 1.5;
-      }
+    /* Form */
+    .form-row { display: flex; gap: 8px; margin-top: 8px; }
+    .form-row input {
+      flex: 1; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line);
+      background: rgba(255,255,255,0.8); font-size: 0.9rem; min-width: 0;
+    }
+    .btn {
+      padding: 10px 16px; border: 0; border-radius: 12px; cursor: pointer;
+      font-size: 0.9rem; font-weight: 600; white-space: nowrap;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.5; cursor: wait; }
 
-      .workspace {
-        min-height: 100vh;
-        display: grid;
-        grid-template-columns: 112px minmax(0, 1fr);
-        gap: 18px;
-        padding: 18px;
-      }
+    /* Overlay checkboxes */
+    .overlay-list { display: flex; flex-direction: column; gap: 6px; }
+    .overlay-item {
+      display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+      border-radius: 12px; border: 1px solid var(--line); cursor: pointer;
+      transition: background 140ms; font-size: 0.88rem;
+    }
+    .overlay-item:hover { background: rgba(33,83,71,0.05); }
+    .overlay-item input { accent-color: var(--accent); width: 16px; height: 16px; }
+    .overlay-swatch {
+      width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0;
+    }
 
-      .panel {
-        background: var(--panel-strong);
-        border: 1px solid var(--line);
-        border-radius: 24px;
-        backdrop-filter: blur(8px);
-        box-shadow: var(--shadow);
-      }
+    /* Weather card */
+    .weather-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .weather-metric {
+      padding: 10px; border-radius: 12px; background: rgba(255,255,255,0.6);
+      border: 1px solid var(--line); text-align: center;
+    }
+    .weather-metric .val { font-size: 1.3rem; font-weight: 700; color: var(--accent-3); }
+    .weather-metric .lbl { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .weather-station { font-size: 0.82rem; color: var(--muted); margin-top: 8px; }
 
-      .rail {
-        padding: 18px 12px;
-        display: grid;
-        align-content: start;
-        gap: 12px;
-      }
+    /* Source status */
+    .source-list { display: flex; flex-direction: column; gap: 6px; }
+    .source-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line);
+      font-size: 0.84rem;
+    }
+    .source-dot {
+      width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px;
+    }
+    .source-dot.ready { background: #2a8; }
+    .source-dot.error { background: #d44; }
+    .source-dot.idle { background: #aaa; }
 
-      .rail-badge {
-        padding: 12px 10px;
-        border-radius: 18px;
-        background: linear-gradient(180deg, rgba(33, 83, 71, 0.94), rgba(20, 38, 29, 0.96));
-        color: #f5f0e6;
-        font-size: 0.76rem;
-        letter-spacing: 0.18em;
-        text-transform: uppercase;
-        text-align: center;
-      }
+    /* Status bar */
+    .status-bar {
+      padding: 6px 0 0; font-size: 0.75rem; color: var(--muted); text-align: center;
+    }
 
-      .window-trigger {
-        border: 1px solid transparent;
-        border-radius: 18px;
-        background: rgba(255, 255, 255, 0.56);
-        color: var(--ink);
-        padding: 14px 10px;
-        display: grid;
-        gap: 4px;
-        cursor: pointer;
-        transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
-      }
+    @media (max-width: 800px) {
+      .app { flex-direction: column; }
+      .map-panel { flex: 1; min-height: 50vh; }
+      .sidebar { flex: 0 0 auto; max-height: 50vh; border-left: none; border-top: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="map-panel">
+      <div id="map"></div>
+      <div class="map-watermark" id="map-watermark">Area: <strong id="map-area-label">North Karelia</strong></div>
+    </div>
 
-      .window-trigger:hover,
-      .window-trigger:focus-visible {
-        transform: translateY(-1px);
-        border-color: rgba(33, 83, 71, 0.24);
-      }
-
-      .window-trigger.active {
-        background: linear-gradient(180deg, rgba(33, 83, 71, 0.95), rgba(25, 93, 133, 0.86));
-        color: #f5f0e6;
-      }
-
-      .window-trigger strong {
-        font-size: 0.88rem;
-      }
-
-      .window-trigger span {
-        font-size: 0.7rem;
-        opacity: 0.8;
-      }
-
-      .main-shell {
-        min-width: 0;
-        display: grid;
-        grid-template-rows: auto 1fr;
-        gap: 18px;
-      }
-
-      .workspace-header {
-        display: grid;
-        grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
-        gap: 18px;
-        align-items: stretch;
-      }
-
-      .brief {
-        padding: 22px 24px;
-        background:
-          linear-gradient(135deg, rgba(33, 83, 71, 0.96), rgba(20, 38, 29, 0.98)),
-          linear-gradient(45deg, rgba(196, 108, 50, 0.12), rgba(25, 93, 133, 0.12));
-        color: #f6f2eb;
-        position: relative;
-        overflow: hidden;
-      }
-
-      .brief::after {
-        content: "";
-        position: absolute;
-        inset: auto -40px -60px auto;
-        width: 220px;
-        height: 220px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(196, 108, 50, 0.3), transparent 60%);
-      }
-
-      .brief-copy {
-        max-width: 58ch;
-        position: relative;
-        z-index: 1;
-      }
-
-      .eyebrow {
-        margin: 0 0 8px;
-        font-size: 0.72rem;
-        letter-spacing: 0.24em;
-        text-transform: uppercase;
-      }
-
-      h1 {
-        margin: 0 0 10px;
-        font-size: clamp(2rem, 4vw, 3.6rem);
-        line-height: 0.94;
-        max-width: 12ch;
-      }
-
-      .header-side {
-        display: grid;
-        gap: 18px;
-      }
-
-      .control-card {
-        padding: 20px;
-      }
-
-      .control-card h2 {
-        margin: 0 0 14px;
-        font-size: 1.05rem;
-      }
-
-      .area-form {
-        display: grid;
-        grid-template-columns: 1fr auto auto;
-        gap: 10px;
-        margin-top: 14px;
-      }
-
-      .area-form input {
-        min-width: 0;
-        padding: 12px 14px;
-        border-radius: 14px;
-        border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.9);
-      }
-
-      .button {
-        border: 0;
-        border-radius: 14px;
-        padding: 12px 14px;
-        cursor: pointer;
-        color: #f6f2eb;
-        background: var(--accent);
-      }
-
-      .button.secondary {
-        background: rgba(20, 38, 29, 0.12);
-        color: var(--ink);
-      }
-
-      .meta-strip,
-      .stat-strip,
-      .map-kicker,
-      .check-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-      }
-
-      .meta-strip,
-      .stat-strip {
-        margin-top: 16px;
-      }
-
-      .pill,
-      .stat-pill,
-      .tag,
-      .check-pill {
-        border-radius: 999px;
-        border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.64);
-      }
-
-      .pill,
-      .stat-pill,
-      .tag {
-        padding: 9px 12px;
-      }
-
-      .check-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 12px;
-      }
-
-      .check-pill input {
-        accent-color: var(--accent);
-      }
-
-      .shell-body {
-        min-width: 0;
-        display: grid;
-        grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.85fr);
-        gap: 18px;
-      }
-
-      .map-stage {
-        position: relative;
-        overflow: hidden;
-        min-height: 72vh;
-        padding: 22px;
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0)),
-          linear-gradient(135deg, rgba(33, 83, 71, 0.14), rgba(196, 108, 50, 0.12));
-      }
-
-      .map-stage::before,
-      .map-stage::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-      }
-
-      .map-stage::before {
-        background:
-          linear-gradient(rgba(20, 38, 29, 0.08) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(20, 38, 29, 0.08) 1px, transparent 1px);
-        background-size: 44px 44px;
-        opacity: 0.72;
-      }
-
-      .map-stage::after {
-        background:
-          radial-gradient(circle at 22% 34%, rgba(33, 83, 71, 0.38), transparent 14%),
-          radial-gradient(circle at 70% 29%, rgba(25, 93, 133, 0.26), transparent 12%),
-          radial-gradient(circle at 64% 68%, rgba(196, 108, 50, 0.28), transparent 10%),
-          linear-gradient(135deg, transparent 48%, rgba(20, 38, 29, 0.12) 49%, transparent 50%),
-          linear-gradient(215deg, transparent 40%, rgba(20, 38, 29, 0.1) 41%, transparent 42%);
-        opacity: 0.96;
-      }
-
-      .map-shell {
-        position: relative;
-        z-index: 1;
-        height: 100%;
-        display: grid;
-        grid-template-rows: auto 1fr auto;
-        gap: 18px;
-      }
-
-      .map-topbar,
-      .map-footer,
-      .dashboard-head,
-      .window-heading,
-      .widget-row,
-      .source-row {
-        display: flex;
-        justify-content: space-between;
-        gap: 10px;
-        align-items: center;
-      }
-
-      .map-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 280px;
-        gap: 18px;
-        align-items: start;
-      }
-
-      #map {
-        height: 520px;
-        border-radius: 20px;
-        border: 1px solid rgba(20, 38, 29, 0.14);
-      }
-
-      .window-heading span,
-      .status-text,
-      .timeline-row time {
-        color: var(--muted);
-        font-size: 0.82rem;
-      }
-
-      .window-stack,
-      .dashboard,
-      .dashboard-grid,
-      .header-side,
-      .widget-list,
-      .source-list,
-      .timeline {
-        display: grid;
-        gap: 14px;
-      }
-
-      .workspace-window {
-        padding: 16px;
-        border-radius: 20px;
-        border: 1px solid rgba(20, 38, 29, 0.14);
-        background: rgba(246, 242, 233, 0.84);
-        display: none;
-      }
-
-      .workspace-window.active {
-        display: grid;
-        gap: 14px;
-      }
-
-      .window-heading h2,
-      .dashboard-head h2,
-      .card h3 {
-        margin: 0;
-      }
-
-      .map-notes,
-      .weather-hero,
-      .weather-grid {
-        display: grid;
-        gap: 12px;
-      }
-
-      .map-notes {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-
-      .micro-card,
-      .card,
-      .metric,
-      .widget-row,
-      .source-row,
-      .weather-main,
-      .empty-state {
-        padding: 14px;
-        border-radius: 18px;
-        border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.66);
-      }
-
-      .dashboard {
-        min-width: 0;
-        padding: 18px;
-        align-content: start;
-      }
-
-      .weather-hero {
-        grid-template-columns: 1.1fr 0.9fr;
-      }
-
-      .weather-main {
-        background: linear-gradient(135deg, rgba(25, 93, 133, 0.12), rgba(33, 83, 71, 0.1));
-        border-color: rgba(25, 93, 133, 0.16);
-      }
-
-      .kpi {
-        font-size: 2rem;
-        margin: 8px 0;
-        color: var(--accent-3);
-      }
-
-      .metric strong {
-        display: block;
-        margin-top: 4px;
-        font-size: 1rem;
-      }
-
-      .timeline-row {
-        display: grid;
-        grid-template-columns: 92px 1fr;
-        gap: 12px;
-        align-items: start;
-      }
-
-      @media (max-width: 1180px) {
-        .workspace-header,
-        .shell-body,
-        .map-grid,
-        .weather-hero,
-        .map-notes {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      @media (max-width: 920px) {
-        .workspace {
-          grid-template-columns: 1fr;
-        }
-
-        .rail {
-          grid-auto-flow: column;
-          grid-auto-columns: minmax(120px, 1fr);
-          overflow-x: auto;
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <main class="workspace">
-      <nav class="panel rail" aria-label="Workspace navigation">
-        <div class="rail-badge">IPB UI</div>
-        <button class="window-trigger active" data-window-trigger="home">
-          <strong>Home</strong>
-          <span>Map view</span>
-        </button>
-        <button class="window-trigger" data-window-trigger="overlays">
-          <strong>Overlays</strong>
-          <span>Map settings</span>
-        </button>
-        <button class="window-trigger" data-window-trigger="weather">
-          <strong>Weather</strong>
-          <span>Dashboard</span>
-        </button>
-        <button class="window-trigger" data-window-trigger="widgets">
-          <strong>Widgets</strong>
-          <span>Customize</span>
-        </button>
-      </nav>
-
-      <section class="main-shell">
-        <header class="workspace-header">
-          <section class="panel brief">
-            <div class="brief-copy">
-              <p class="eyebrow">Operational Workspace</p>
-              <h1>Map-first home screen with modular windows.</h1>
-              <p>
-                This shell keeps the map as the primary surface, moves settings into dedicated
-                windows, and keeps the right-side dashboard ready for customizable weather and
-                follow-on IPB widgets.
-              </p>
-              <div class="meta-strip" id="meta-strip">
-                <span class="pill">Area: North Karelia</span>
-                <span class="pill">Timeframe: 72h</span>
-                <span class="pill">Weather window: waiting for data</span>
-              </div>
-            </div>
-          </section>
-
-          <div class="header-side">
-            <section class="panel control-card">
-              <h2>Scenario controls</h2>
-              <p>Use the same screen shell for different AOIs, timeframes, and dashboard mixes.</p>
-              <form class="area-form" id="scenario-form">
-                <input id="area-input" name="area" value="North Karelia" aria-label="Area" />
-                <input id="timeframe-input" name="timeframe" value="72h" aria-label="Timeframe" />
-                <button class="button" type="submit">Refresh</button>
-              </form>
-              <div class="stat-strip" id="summary-strip">
-                <span class="stat-pill">Layers: 0</span>
-                <span class="stat-pill">Weather widgets: 3</span>
-                <span class="stat-pill">Dashboard mode: Custom</span>
-              </div>
-            </section>
+    <aside class="sidebar" id="sidebar">
+      <!-- Navigation -->
+      <div class="section">
+        <div class="section-header">Navigation</div>
+        <div class="section-body">
+          <div class="nav-row">
+            <a class="nav-item active" href="#"><span class="nav-icon">🗺️</span>Map</a>
+            <a class="nav-item" href="#"><span class="nav-icon">🌤️</span>Weather</a>
+            <a class="nav-item" href="#"><span class="nav-icon">📊</span>Analysis</a>
+            <a class="nav-item" href="#"><span class="nav-icon">📋</span>Reports</a>
           </div>
-        </header>
+        </div>
+      </div>
 
-        <section class="shell-body">
-          <section class="panel map-stage">
-            <div class="map-shell">
-              <div class="map-topbar">
-                <div class="map-kicker">
-                  <span class="tag">Home screen: Map view</span>
-                  <span class="tag" id="active-window-label">Window: Home</span>
-                  <span class="tag" id="weather-status-tag">Weather: pending</span>
-                </div>
-                <div class="map-kicker" id="overlay-summary">
-                  <span class="tag">Terrain</span>
-                  <span class="tag">Infrastructure</span>
-                  <span class="tag">Population</span>
-                </div>
-              </div>
-
-              <div class="map-grid">
-                <div id="map" aria-label="Map home screen"></div>
-
-                <div class="window-stack">
-                  <section class="workspace-window active" data-window="home">
-                    <div class="window-heading">
-                      <h2>Home window</h2>
-                      <span>Primary navigation surface</span>
-                    </div>
-                    <p>
-                      Keep the map persistent, switch focused tools with the left rail, and let the
-                      right dashboard adapt to the currently selected mission need.
-                    </p>
-                    <div class="map-notes">
-                      <article class="micro-card">
-                        <strong>Immediate use</strong>
-                        <p>Track AOI, active overlays, source readiness, and current weather at a glance.</p>
-                      </article>
-                      <article class="micro-card">
-                        <strong>Next overlay targets</strong>
-                        <p>Terrain shading, infrastructure chokepoints, cell coverage, and population density.</p>
-                      </article>
-                      <article class="micro-card">
-                        <strong>Composable shell</strong>
-                        <p>Each window is a standalone panel, easy to extend without changing layout logic.</p>
-                      </article>
-                    </div>
-                  </section>
-
-                  <section class="workspace-window" data-window="overlays">
-                    <div class="window-heading">
-                      <h2>Overlay studio</h2>
-                      <span>Map settings and visibility</span>
-                    </div>
-                    <p>Turn overlays on or off here without losing the home-screen map context.</p>
-                    <div class="check-grid" id="overlay-controls"></div>
-                  </section>
-
-                  <section class="workspace-window" data-window="weather">
-                    <div class="window-heading">
-                      <h2>Weather desk</h2>
-                      <span>Focused weather workspace</span>
-                    </div>
-                    <div class="timeline" id="weather-timeline"></div>
-                  </section>
-
-                  <section class="workspace-window" data-window="widgets">
-                    <div class="window-heading">
-                      <h2>Widget library</h2>
-                      <span>Dashboard customization</span>
-                    </div>
-                    <p>Choose which cards stay visible in the right-side dashboard.</p>
-                    <div class="check-grid" id="widget-controls"></div>
-                  </section>
-                </div>
-              </div>
-
-              <div class="map-footer">
-                <div class="map-kicker">
-                  <span class="tag">Extensible window system</span>
-                  <span class="tag">Dashboard customization enabled</span>
-                </div>
-                <span class="status-text" id="status-line">Loading UI state from existing API routes.</span>
-              </div>
+      <!-- Scenario Controls -->
+      <div class="section">
+        <div class="section-header">Scenario</div>
+        <div class="section-body">
+          <form id="scenario-form">
+            <input id="area-input" name="area" value="North Karelia" placeholder="Area" />
+            <div class="form-row">
+              <input id="timeframe-input" name="timeframe" value="72h" placeholder="Timeframe" />
+              <button class="btn btn-primary" id="refresh-btn" type="submit">Refresh</button>
             </div>
-          </section>
+          </form>
+        </div>
+      </div>
 
-          <aside class="panel dashboard">
-            <div class="dashboard-head">
-              <h2>Right-side dashboard</h2>
-              <button class="button secondary" id="toggle-all-widgets" type="button">Reset widgets</button>
-            </div>
+      <!-- Overlay Settings -->
+      <div class="section">
+        <div class="section-header">Overlay Settings</div>
+        <div class="section-body">
+          <div class="overlay-list" id="overlay-controls"></div>
+        </div>
+      </div>
 
-            <div class="dashboard-grid" id="dashboard-grid">
-              <section class="card" data-widget="weatherOverview">
-                <h3>Weather information</h3>
-                <div class="weather-hero">
-                  <div class="weather-main">
-                    <p id="weather-station-name">No weather station loaded yet</p>
-                    <div class="kpi" id="weather-temperature">--</div>
-                    <p id="weather-summary">Trigger ingestion for FMI data, then this card will show live normalized weather.</p>
-                  </div>
-                  <div class="widget-list" id="weather-metrics">
-                    <div class="metric">Visibility<strong>--</strong></div>
-                    <div class="metric">Wind speed<strong>--</strong></div>
-                    <div class="metric">Cloud cover<strong>--</strong></div>
-                    <div class="metric">Latest sample<strong>--</strong></div>
-                  </div>
-                </div>
-              </section>
+      <!-- Weather -->
+      <div class="section">
+        <div class="section-header">Current Weather</div>
+        <div class="section-body">
+          <div class="weather-grid" id="weather-grid">
+            <div class="weather-metric"><div class="val" id="w-temp">--</div><div class="lbl">Temp</div></div>
+            <div class="weather-metric"><div class="val" id="w-wind">--</div><div class="lbl">Wind</div></div>
+            <div class="weather-metric"><div class="val" id="w-vis">--</div><div class="lbl">Visibility</div></div>
+            <div class="weather-metric"><div class="val" id="w-cloud">--</div><div class="lbl">Cloud</div></div>
+          </div>
+          <div class="weather-station" id="w-station">No weather data loaded</div>
+        </div>
+      </div>
 
-              <section class="card" data-widget="sourceStatus">
-                <h3>Source visibility</h3>
-                <div class="source-list" id="source-list"></div>
-              </section>
+      <!-- Source Status -->
+      <div class="section">
+        <div class="section-header">Data Sources</div>
+        <div class="section-body">
+          <div class="source-list" id="source-list"></div>
+        </div>
+      </div>
 
-              <section class="card" data-widget="dashboardConfig">
-                <h3>Dashboard controls</h3>
-                <p>
-                  Weather is first, but this side rail is ready for terrain, movement, logistics, and
-                  population widgets as those datasets come online.
-                </p>
-                <div class="widget-list">
-                  <div class="widget-row">
-                    <span>Map overlays</span>
-                    <strong id="overlay-count">0 active</strong>
-                  </div>
-                  <div class="widget-row">
-                    <span>Visible widgets</span>
-                    <strong id="visible-widget-count">0</strong>
-                  </div>
-                  <div class="widget-row">
-                    <span>Dashboard mode</span>
-                    <strong>Customizable</strong>
-                  </div>
-                </div>
-              </section>
-            </div>
-          </aside>
-        </section>
-      </section>
-    </main>
+      <div class="status-bar" id="status-line">Ready. Set area and click Refresh to ingest data.</div>
+    </aside>
+  </div>
 
-    <script>
-      const state = {
-        activeWindow: "home",
-        area: "North Karelia",
-        timeframe: "72h",
-        layers: [],
-        widgets: [
-          { id: "weatherOverview", label: "Weather information", visible: true },
-          { id: "sourceStatus", label: "Source visibility", visible: true },
-          { id: "dashboardConfig", label: "Dashboard controls", visible: true },
-        ],
-        weatherRecord: null,
-        sources: [],
-        map: null,
-        mapDataLayer: null,
-        tileLayer: null,
-      };
+  <script>
+    const state = {
+      area: "North Karelia", timeframe: "72h",
+      map: null, mapDataLayer: null, layers: [],
+      sources: [], weatherRecord: null,
+    };
 
-      const windowButtons = [...document.querySelectorAll("[data-window-trigger]")];
-      const windows = [...document.querySelectorAll("[data-window]")];
-      const widgetCards = [...document.querySelectorAll("[data-widget]")];
-      const scenarioForm = document.getElementById("scenario-form");
-      const areaInput = document.getElementById("area-input");
-      const timeframeInput = document.getElementById("timeframe-input");
-      const overlayControls = document.getElementById("overlay-controls");
-      const widgetControls = document.getElementById("widget-controls");
-      const sourceList = document.getElementById("source-list");
-      const weatherTimeline = document.getElementById("weather-timeline");
-      const overlaySummary = document.getElementById("overlay-summary");
-      const statusLine = document.getElementById("status-line");
-      const metaStrip = document.getElementById("meta-strip");
-      const summaryStrip = document.getElementById("summary-strip");
+    const form = document.getElementById("scenario-form");
+    const areaInput = document.getElementById("area-input");
+    const timeframeInput = document.getElementById("timeframe-input");
+    const refreshBtn = document.getElementById("refresh-btn");
+    const overlayControls = document.getElementById("overlay-controls");
+    const sourceListEl = document.getElementById("source-list");
+    const statusLine = document.getElementById("status-line");
 
-      windowButtons.forEach((button) => {
-        button.addEventListener("click", () => setActiveWindow(button.dataset.windowTrigger));
-      });
+    function getCenter(area) {
+      const a = area.toLowerCase();
+      if (a.includes("north karelia")) return [62.8, 30.2];
+      if (a.includes("lapland") || a.includes("kasivarren")) return [69.0, 21.5];
+      if (a.includes("archipelago") || a.includes("saaristomeri")) return [60.2, 22.0];
+      return [62.8, 30.2];
+    }
 
-      scenarioForm.addEventListener("submit", (event) => {
-        event.preventDefault();
-        state.area = areaInput.value.trim() || "North Karelia";
-        state.timeframe = timeframeInput.value.trim() || "72h";
-        if (state.map) state.map.setView(getCenter(state.area), 9);
-        loadWorkspace();
-      });
+    function initMap() {
+      state.map = L.map("map", { zoomControl: true }).setView(getCenter(state.area), 9);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">OSM</a>', maxZoom: 18,
+      }).addTo(state.map);
 
-      document.getElementById("toggle-all-widgets").addEventListener("click", () => {
-        state.widgets = state.widgets.map((widget) => ({ ...widget, visible: true }));
-        renderWidgetControls();
-        renderDashboardVisibility();
-      });
+      state.mapDataLayer = L.geoJSON(null, {
+        style: (f) => ({
+          color: f.properties._collection === "tieviiva" ? "#c46c32"
+            : f.properties._collection === "rakennus" ? "#195d85"
+            : f.properties._collection === "jarvi" || f.properties._collection === "meri" ? "#215347"
+            : "#5a6a61",
+          weight: f.geometry?.type === "LineString" ? 2 : 1,
+          fillOpacity: 0.2,
+        }),
+        pointToLayer: (f, ll) => {
+          const c = f.properties._collection === "paikannimi" ? "#c46c32" : "#195d85";
+          return L.circleMarker(ll, { radius: 5, fillColor: c, color: "#fff", weight: 1, fillOpacity: 0.8 });
+        },
+        onEachFeature: (f, layer) => {
+          const p = f.properties || {};
+          const label = p._label || p._collection || "";
+          const name = p.nimi || "";
+          layer.bindPopup(`<b>${label}</b>${name ? `<br>${name}` : ""}`);
+        },
+      }).addTo(state.map);
+    }
 
-      function setActiveWindow(windowId) {
-        state.activeWindow = windowId;
-        windowButtons.forEach((button) => button.classList.toggle("active", button.dataset.windowTrigger === windowId));
-        windows.forEach((panel) => panel.classList.toggle("active", panel.dataset.window === windowId));
-        document.getElementById("active-window-label").textContent = `Window: ${labelize(windowId)}`;
-      }
+    async function loadMapData() {
+      try {
+        const resp = await fetch(`/api/map-data/nls?area=${encodeURIComponent(state.area)}`);
+        const geojson = await resp.json();
+        state.mapDataLayer.clearLayers();
+        state.mapDataLayer.addData(geojson);
+      } catch (e) { console.error("Map data load failed:", e); }
+    }
 
-      function labelize(value) {
-        return value.replace(/([A-Z])/g, " $1").replace(/^./, (match) => match.toUpperCase());
-      }
-
-      function getCenter(area) {
-        const a = area.toLowerCase();
-        if (a.includes("north karelia") || a === "joensuu") return [62.8, 30.2];
-        if (a.includes("lapland") || a.includes("kasivarren")) return [69.0, 21.5];
-        if (a.includes("archipelago") || a.includes("saaristomeri")) return [60.2, 22.0];
-        return [62.8, 30.2];
-      }
-
-      function initMap() {
-        const center = getCenter(state.area);
-        state.map = L.map("map", { zoomControl: true }).setView(center, 9);
-        state.tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: '&copy; <a href="https://openstreetmap.org/copyright">OSM</a>',
-          maxZoom: 18,
-        }).addTo(state.map);
-        state.mapDataLayer = L.geoJSON(null, {
-          style: (feature) => ({
-            color: feature.properties._collection === "tieviiva" ? "#c46c32"
-              : feature.properties._collection === "rakennus" ? "#195d85"
-              : feature.properties._collection === "jarvi" || feature.properties._collection === "meri" ? "#215347"
-              : "#5a6a61",
-            weight: feature.geometry?.type === "LineString" ? 2 : 1,
-            fillOpacity: 0.2,
-          }),
-          pointToLayer: (feature, latlng) => {
-            const color = feature.properties._collection === "paikannimi" ? "#c46c32" : "#195d85";
-            return L.circleMarker(latlng, { radius: 5, fillColor: color, color: "#fff", weight: 1, fillOpacity: 0.8 });
-          },
-          onEachFeature: (feature, layer) => {
-            const props = feature.properties || {};
-            const label = props._label || props._collection || "";
-            const name = props.nimi || props. nimi || props.namn || "";
-            layer.bindPopup(`<b>${label}</b>${name ? `<br>${name}` : ""}`);
-          },
-        }).addTo(state.map);
-      }
-
-      async function loadMapData() {
-        try {
-          const resp = await fetch(`/api/map-data/nls?area=${encodeURIComponent(state.area)}`);
-          const geojson = await resp.json();
-          if (state.mapDataLayer) {
-            state.mapDataLayer.clearLayers();
-            state.mapDataLayer.addData(geojson);
-          }
-        } catch (e) {
-          console.error("Map data load failed:", e);
-        }
-      }
-
-      async function loadWorkspace() {
-        statusLine.textContent = "Loading UI...";
-        if (!state.map) initMap();
-
-        try {
-          const [placeholderResponse, datasetsResponse, sourcesResponse] = await Promise.all([
-            fetch(`/api/ui-placeholder?area=${encodeURIComponent(state.area)}&timeframe=${encodeURIComponent(state.timeframe)}`),
-            fetch("/api/datasets"),
-            fetch("/api/sources"),
-          ]);
-
-          const placeholder = await placeholderResponse.json();
-          const datasets = await datasetsResponse.json();
-          const sources = await sourcesResponse.json();
-
-          state.layers = placeholder.map_layers || [];
-          state.sources = sources || [];
-          state.weatherRecord = [...datasets].reverse().find((record) => record.category === "weather") || null;
-
-          renderHeader(placeholder);
-          renderLayers();
-          renderSources();
-          renderWeather();
-          renderWidgetControls();
-          renderDashboardVisibility();
-          loadMapData();
-
-          statusLine.textContent = "Workspace synced. Map shows ingested NLS data overlays.";
-        } catch (error) {
-          console.error(error);
-          statusLine.textContent = "UI shell loaded, but API data could not be refreshed.";
-        }
-      }
-
-      function renderHeader(placeholder) {
-        document.getElementById("map-area-label").textContent = state.area;
-        metaStrip.innerHTML = `
-          <span class="pill">Area: ${state.area}</span>
-          <span class="pill">Timeframe: ${state.timeframe}</span>
-          <span class="pill">Cards: ${(placeholder.dashboard_cards || []).length}</span>
+    function renderOverlays() {
+      overlayControls.innerHTML = "";
+      state.layers.forEach((layer) => {
+        const colors = { terrain: "#5a6a61", infrastructure: "#c46c32", demographics: "#195d85", weather: "#215347" };
+        const el = document.createElement("label");
+        el.className = "overlay-item";
+        el.innerHTML = `
+          <input type="checkbox" checked />
+          <span class="overlay-swatch" style="background:${colors[layer.category] || '#888'}"></span>
+          <span>${layer.title}</span>
         `;
-        summaryStrip.innerHTML = `
-          <span class="stat-pill">Layers: ${state.layers.length}</span>
-          <span class="stat-pill">Weather widgets: 3</span>
-          <span class="stat-pill">Dashboard mode: Custom</span>
+        overlayControls.appendChild(el);
+      });
+    }
+
+    function renderSources() {
+      sourceListEl.innerHTML = "";
+      if (!state.sources.length) {
+        sourceListEl.innerHTML = '<div class="source-row" style="color:var(--muted)">No sources loaded</div>';
+        return;
+      }
+      state.sources.forEach((s) => {
+        const row = document.createElement("div");
+        row.className = "source-row";
+        row.innerHTML = `
+          <span><span class="source-dot ${s.status}"></span>${s.name}</span>
+          <span style="font-size:0.75rem;color:var(--muted)">${s.status}</span>
         `;
+        sourceListEl.appendChild(row);
+      });
+    }
+
+    function renderWeather() {
+      const r = state.weatherRecord;
+      const obs = r?.data?.observations || {};
+      const station = r?.data?.station || {};
+      const t = obs.temperature?.latest?.value;
+      const w = obs.wind_speed?.latest?.value;
+      const v = obs.visibility?.latest?.value;
+      const c = obs.cloud_cover?.latest?.value;
+      document.getElementById("w-temp").textContent = t == null ? "--" : `${t}°`;
+      document.getElementById("w-wind").textContent = w == null ? "--" : `${w} m/s`;
+      document.getElementById("w-vis").textContent = v == null ? "--" : `${(v/1000).toFixed(1)} km`;
+      document.getElementById("w-cloud").textContent = c == null ? "--" : `${c}/8`;
+      document.getElementById("w-station").textContent = station.name || "No weather data loaded";
+
+      if (state.map && station.latitude && station.longitude) {
+        L.circleMarker([station.latitude, station.longitude], {
+          radius: 10, fillColor: "#c46c32", color: "#fff", weight: 2, fillOpacity: 0.9,
+        }).addTo(state.map).bindPopup(`
+          <b>${station.name}</b><br>Temp: ${t ?? "--"}°C<br>Wind: ${w ?? "--"} m/s<br>Vis: ${v ?? "--"} m
+        `);
       }
+    }
 
-      function renderLayers() {
-        overlayControls.innerHTML = "";
-        overlaySummary.innerHTML = "";
-
-        state.layers.forEach((layer) => {
-          const id = `layer-${layer.layer_id}`;
-          const label = document.createElement("label");
-          label.className = "check-pill";
-          label.innerHTML = `
-            <input id="${id}" type="checkbox" ${layer.enabled_by_default ? "checked" : ""} />
-            <span>${layer.title}</span>
-          `;
-          label.querySelector("input").addEventListener("change", renderOverlaySummary);
-          overlayControls.appendChild(label);
+    async function ingest() {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = "Ingesting...";
+      statusLine.textContent = `Ingesting data for ${state.area}...`;
+      try {
+        await fetch("/api/ingest", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ area: state.area, timeframe: state.timeframe }),
         });
+      } catch (e) { console.error(e); }
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "Refresh";
+    }
 
-        renderOverlaySummary();
+    async function loadWorkspace() {
+      if (!state.map) initMap();
+      document.getElementById("map-area-label").textContent = state.area;
+
+      try {
+        const [placeholderResp, datasetsResp, sourcesResp] = await Promise.all([
+          fetch(`/api/ui-placeholder?area=${encodeURIComponent(state.area)}&timeframe=${encodeURIComponent(state.timeframe)}`),
+          fetch("/api/datasets"),
+          fetch("/api/sources"),
+        ]);
+        state.layers = (await placeholderResp.json()).map_layers || [];
+        state.sources = await sourcesResp.json();
+        const datasets = await datasetsResp.json();
+        state.weatherRecord = [...datasets].reverse().find((r) => r.category === "weather") || null;
+
+        renderOverlays();
+        renderSources();
+        renderWeather();
+        loadMapData();
+        statusLine.textContent = `Synced. ${(await (await fetch(`/api/map-data/nls?area=${encodeURIComponent(state.area)}`)).json()).features.length} features on map.`;
+      } catch (e) {
+        console.error(e);
+        statusLine.textContent = "Could not load workspace data.";
       }
+    }
 
-      function renderOverlaySummary() {
-        const selected = [...overlayControls.querySelectorAll("input:checked")].map((input) => input.nextElementSibling.textContent);
-        overlaySummary.innerHTML = "";
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      state.area = areaInput.value.trim() || "North Karelia";
+      state.timeframe = timeframeInput.value.trim() || "72h";
+      document.getElementById("map-area-label").textContent = state.area;
+      if (state.map) state.map.setView(getCenter(state.area), 9);
+      await ingest();
+      await loadWorkspace();
+    });
 
-        if (selected.length === 0) {
-          overlaySummary.innerHTML = '<span class="tag">No overlays selected</span>';
-        } else {
-          selected.forEach((name) => {
-            const item = document.createElement("span");
-            item.className = "tag";
-            item.textContent = name;
-            overlaySummary.appendChild(item);
-          });
-        }
-
-        document.getElementById("overlay-count").textContent = `${selected.length} active`;
-      }
-
-      function renderWidgetControls() {
-        widgetControls.innerHTML = "";
-
-        state.widgets.forEach((widget) => {
-          const label = document.createElement("label");
-          label.className = "check-pill";
-          label.innerHTML = `
-            <input type="checkbox" ${widget.visible ? "checked" : ""} />
-            <span>${widget.label}</span>
-          `;
-          label.querySelector("input").addEventListener("change", (event) => {
-            widget.visible = event.target.checked;
-            renderDashboardVisibility();
-          });
-          widgetControls.appendChild(label);
-        });
-      }
-
-      function renderDashboardVisibility() {
-        widgetCards.forEach((card) => {
-          const config = state.widgets.find((widget) => widget.id === card.dataset.widget);
-          card.hidden = config ? !config.visible : false;
-        });
-
-        document.getElementById("visible-widget-count").textContent = String(
-          state.widgets.filter((widget) => widget.visible).length
-        );
-      }
-
-      function renderSources() {
-        sourceList.innerHTML = "";
-
-        state.sources.forEach((source) => {
-          const row = document.createElement("div");
-          row.className = "source-row";
-          row.innerHTML = `
-            <div>
-              <strong>${source.name}</strong>
-              <p>${source.category}</p>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;">
-              <span class="source-dot ${source.status}"></span>
-              <span>${source.status}</span>
-            </div>
-          `;
-          sourceList.appendChild(row);
-        });
-      }
-
-      function renderWeather() {
-        const record = state.weatherRecord;
-        const observations = record && record.data ? record.data.observations || {} : {};
-        const station = record && record.data ? record.data.station || {} : {};
-        const temp = observations.temperature && observations.temperature.latest ? observations.temperature.latest.value : null;
-        const wind = observations.wind_speed && observations.wind_speed.latest ? observations.wind_speed.latest.value : null;
-        const vis = observations.visibility && observations.visibility.latest ? observations.visibility.latest.value : null;
-        const cloud = observations.cloud_cover && observations.cloud_cover.latest ? observations.cloud_cover.latest.value : null;
-        const latestTime =
-          (observations.temperature && observations.temperature.latest && observations.temperature.latest.time) ||
-          (observations.wind_speed && observations.wind_speed.latest && observations.wind_speed.latest.time) ||
-          "--";
-
-        document.getElementById("weather-station-name").textContent = station.name || "No weather station loaded yet";
-        document.getElementById("weather-temperature").textContent = temp == null ? "--" : `${temp} C`;
-        document.getElementById("weather-summary").textContent =
-          (record && record.summary) || "Trigger ingestion for FMI data, then this card will show live normalized weather.";
-        document.getElementById("weather-status-tag").textContent = record ? "Weather: live dataset present" : "Weather: pending";
-
-        if (state.map && station.latitude && station.longitude) {
-          const marker = L.circleMarker([station.latitude, station.longitude], {
-            radius: 10, fillColor: "#c46c32", color: "#fff", weight: 2, fillOpacity: 0.9,
-          }).addTo(state.map);
-          marker.bindPopup(`
-            <b>${station.name}</b><br>
-            Temp: ${temp ?? "--"} C<br>
-            Wind: ${wind ?? "--"} m/s<br>
-            Visibility: ${vis ?? "--"} m
-          `);
-        }
-
-        const metrics = [
-          ["Visibility", vis == null ? "--" : `${vis} m`],
-          ["Wind speed", wind == null ? "--" : `${wind} m/s`],
-          ["Cloud cover", cloud == null ? "--" : `${cloud} okta`],
-          ["Latest sample", latestTime],
-        ];
-
-        document.getElementById("weather-metrics").innerHTML = metrics
-          .map(
-            ([label, value]) => `
-              <div class="metric">
-                ${label}
-                <strong>${value}</strong>
-              </div>
-            `
-          )
-          .join("");
-
-        weatherTimeline.innerHTML = record
-          ? buildWeatherTimeline(observations)
-          : '<div class="empty-state">No weather dataset is stored yet. Once FMI ingestion runs, this desk will show the latest normalized observation timeline.</div>';
-      }
-
-      function buildWeatherTimeline(observations) {
-        const entries = observations.temperature && observations.temperature.values ? observations.temperature.values : [];
-
-        if (entries.length === 0) {
-          return '<div class="empty-state">Weather dataset exists, but there are no temperature time points to display yet.</div>';
-        }
-
-        return entries
-          .slice(-4)
-          .reverse()
-          .map((entry) => {
-            const windValue = findValueAtTime(
-              observations.wind_speed && observations.wind_speed.values ? observations.wind_speed.values : [],
-              entry.time
-            );
-
-            return `
-              <div class="timeline-row">
-                <time>${entry.time}</time>
-                <div class="micro-card">
-                  <strong>Temp ${entry.value == null ? "--" : entry.value} C</strong>
-                  <p>Wind ${windValue == null ? "--" : `${windValue} m/s`} at the same sample point.</p>
-                </div>
-              </div>
-            `;
-          })
-          .join("");
-      }
-
-      function findValueAtTime(entries, time) {
-        const match = entries.find((entry) => entry.time === time);
-        return match ? match.value : null;
-      }
-
-      loadWorkspace();
-      setActiveWindow("home");
-    </script>
-  </body>
+    loadWorkspace();
+  </script>
+</body>
 </html>
