@@ -51,6 +51,16 @@ class DigiroadAdapter(SourceAdapter):
 
     COLLECTION_NAMES = tuple(COLLECTIONS.keys())
 
+    def _ensure_collection_fetch_succeeded(self, collection_data: dict[str, dict[str, Any]]) -> None:
+        if any("error" not in payload for payload in collection_data.values()):
+            return
+
+        error_summary = "; ".join(
+            f"{collection_id}: {payload.get('error', 'unknown error')}"
+            for collection_id, payload in list(collection_data.items())[:3]
+        )
+        raise ValueError(f"Digiroad fetch failed for all collections ({error_summary})")
+
     def _resolve_bbox(self, area: str) -> tuple[float, float, float, float]:
         normalized = self._normalize_area(area)
         return self.AREA_BBOXES.get(normalized, self.AREA_BBOXES["north karelia"])
@@ -87,6 +97,8 @@ class DigiroadAdapter(SourceAdapter):
 
             results = await asyncio.gather(*[fetch_collection(cid) for cid in self.COLLECTION_NAMES])
             collection_data = dict(results)
+
+        self._ensure_collection_fetch_succeeded(collection_data)
 
         total_features = sum(
             cd.get("number_matched", 0) for cd in collection_data.values()

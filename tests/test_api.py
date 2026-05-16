@@ -109,6 +109,45 @@ def test_health_endpoint():
     assert response.json() == {"status": "ok"}
 
 
+def test_map_data_nls_hides_demo_fallback_vectors():
+    state["ingestion_service"]._records.clear()
+    state["ingestion_service"]._records.append(
+        DatasetRecord(
+            source_id="nls",
+            category=SourceCategory.TERRAIN,
+            area="North Karelia",
+            timeframe="72h",
+            summary="NLS demo record",
+            data={
+                "collections": {
+                    "rakennus": {
+                        "label": "Buildings",
+                        "features": [
+                            {
+                                "type": "Feature",
+                                "geometry": {
+                                    "type": "Polygon",
+                                    "coordinates": [[[30.0, 62.4], [30.1, 62.4], [30.1, 62.5], [30.0, 62.5], [30.0, 62.4]]],
+                                },
+                                "properties": {"nimi": "Warehouse cluster"},
+                            }
+                        ],
+                    }
+                },
+                "note": "Demo spatial fallback is used because NLS_API_KEY is not configured.",
+            },
+        )
+    )
+
+    response = client.get("/api/map-data/nls", params={"area": "North Karelia"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["reason"] == "demo-fallback"
+    assert payload["features"] == []
+
+
 def test_analysis_health_endpoint_reports_ollama_model(monkeypatch):
     async def fake_fetch_tags(self):
         return {"models": [{"name": settings.ollama_model}, {"name": "other-model"}]}
@@ -161,13 +200,34 @@ def test_ingestion_flow_for_placeholder_sources(monkeypatch):
     assert ingest_response.status_code == 200
     payload = ingest_response.json()
     assert set(payload["requested_sources"]) == {"nls", "statistics-finland", "digiroad"}
-    assert len(payload["produced_records"]) == 3
+    assert len(payload["produced_records"]) == 2
+    assert {record["source_id"] for record in payload["produced_records"]} == {"statistics-finland", "digiroad"}
     population_record = next(record for record in payload["produced_records"] if record["source_id"] == "statistics-finland")
     assert population_record["data"]["population_total"] > 50000
 
     datasets_response = client.get("/api/datasets")
     assert datasets_response.status_code == 200
-    assert len(datasets_response.json()) == 3
+    assert len(datasets_response.json()) == 2
+
+    sources_response = client.get("/api/sources")
+    assert sources_response.status_code == 200
+    nls_source = next(source for source in sources_response.json() if source["source_id"] == "nls")
+    assert nls_source["status"] == "disabled"
+    assert nls_source["last_error"] == "Disabled until NLS_API_KEY is configured."
+
+
+def test_ingest_rejects_unknown_source_ids():
+    response = client.post(
+        "/api/ingest",
+        json={
+            "area": "North Karelia",
+            "timeframe": "24h",
+            "source_ids": ["missing-source"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unknown source ids: missing-source"
 
 
 def test_fmi_ingestion_flow(monkeypatch):
@@ -400,7 +460,6 @@ def test_aoi_inspection_includes_additional_feature_sources():
     assert any(section["source_id"] == "custom-infra" for section in payload["raw_sections"])
     assert any(item["source_id"] == "custom-infra" for item in payload["agent"]["evidence_bundle"])
 
-
 SAMPLE_OPENCELLID_RECORD = DatasetRecord(
     source_id="opencellid",
     category=SourceCategory.INFRASTRUCTURE,
@@ -422,22 +481,32 @@ SAMPLE_OPENCELLID_RECORD = DatasetRecord(
 
 def test_opencellid_ingestion(monkeypatch):
     state["ingestion_service"]._records.clear()
+    registry = state["registry"]
+    original_definition = registry.get("opencellid")
 
     async def fake_fetch(self, area, timeframe):
         return SAMPLE_OPENCELLID_RECORD
 
     monkeypatch.setattr(OpenCellIdAdapter, "fetch", fake_fetch)
-
-    ingest_response = client.post(
-        "/api/ingest",
-        json={"area": "North Karelia", "timeframe": "72h", "source_ids": ["opencellid"]},
+    registry.update(
+        original_definition.model_copy(
+            update={"enabled": True, "status": "idle", "last_error": None}
+        )
     )
-    assert ingest_response.status_code == 200
-    payload = ingest_response.json()
-    assert payload["requested_sources"] == ["opencellid"]
-    assert len(payload["produced_records"]) == 1
-    assert payload["produced_records"][0]["source_id"] == "opencellid"
-    assert payload["produced_records"][0]["data"]["total_cells"] == 3
+
+    try:
+        ingest_response = client.post(
+            "/api/ingest",
+            json={"area": "North Karelia", "timeframe": "72h", "source_ids": ["opencellid"]},
+        )
+        assert ingest_response.status_code == 200
+        payload = ingest_response.json()
+        assert payload["requested_sources"] == ["opencellid"]
+        assert len(payload["produced_records"]) == 1
+        assert payload["produced_records"][0]["source_id"] == "opencellid"
+        assert payload["produced_records"][0]["data"]["total_cells"] == 3
+    finally:
+        registry.update(original_definition)
 
 
 SAMPLE_OSM_RECORD = DatasetRecord(
@@ -883,3 +952,141 @@ def test_forest_concealment_agent_empty(monkeypatch):
     assert response.status_code == 200
     result = response.json()
     assert "no forest data" in result["summary"].lower()
+
+
+def test_aoi_population_ignores_zero_area_boundary_touches():
+    state["ingestion_service"]._records.clear()
+    state["ingestion_service"]._records.append(
+        DatasetRecord(
+            source_id="statistics-finland",
+            category=SourceCategory.DEMOGRAPHICS,
+            area="North Karelia",
+            timeframe="72h",
+            summary="Population boundary test record",
+            data={
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[29.8, 62.4], [30.0, 62.4], [30.0, 62.7], [29.8, 62.7], [29.8, 62.4]]],
+                        },
+                        "properties": {"cell_id": "boundary-touch", "population": 100},
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[30.0, 62.4], [30.4, 62.4], [30.4, 62.7], [30.0, 62.7], [30.0, 62.4]]],
+                        },
+                        "properties": {"cell_id": "inside", "population": 120},
+                    },
+                ],
+                "population_total": 220,
+            },
+        )
+    )
+
+    response = client.post(
+        "/api/aoi/inspect",
+        json={
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[30.0, 62.4], [30.6, 62.4], [30.6, 62.85], [30.0, 62.85], [30.0, 62.4]]],
+            },
+            "timeframe": "72h",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    stats_payload = payload["raw_data"]["statistics-finland"]
+    assert stats_payload["population_total"] == 120
+    assert stats_payload["feature_count"] == 1
+    assert [feature["properties"]["cell_id"] for feature in stats_payload["features"]] == ["inside"]
+
+
+def test_aoi_inspection_includes_osm_and_cell_sources():
+    state["ingestion_service"]._records.clear()
+    state["ingestion_service"]._records.extend(
+        [
+            DatasetRecord(
+                source_id="osm-poi",
+                category=SourceCategory.OTHER,
+                area="North Karelia",
+                timeframe="24h",
+                summary="OSM POI test record",
+                data={
+                    "categories": {
+                        "education": [
+                            {
+                                "id": "node/1",
+                                "type": "node",
+                                "lat": 62.62,
+                                "lon": 30.35,
+                                "tags": {"name": "School"},
+                            },
+                            {
+                                "id": "node/2",
+                                "type": "node",
+                                "lat": 62.1,
+                                "lon": 29.1,
+                                "tags": {"name": "Outside School"},
+                            },
+                        ]
+                    },
+                    "total_features": 2,
+                },
+            ),
+            DatasetRecord(
+                source_id="opencellid",
+                category=SourceCategory.INFRASTRUCTURE,
+                area="North Karelia",
+                timeframe="24h",
+                summary="OpenCellID test record",
+                data={
+                    "cells": [
+                        {
+                            "cellid": 1001,
+                            "lat": 62.63,
+                            "lon": 30.32,
+                            "radio": "LTE",
+                            "samples": 12,
+                        },
+                        {
+                            "cellid": 1002,
+                            "lat": 62.12,
+                            "lon": 29.15,
+                            "radio": "LTE",
+                            "samples": 4,
+                        },
+                    ],
+                    "total_cells": 2,
+                },
+            ),
+        ]
+    )
+
+    response = client.post(
+        "/api/aoi/inspect",
+        json={
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[30.0, 62.4], [30.6, 62.4], [30.6, 62.85], [30.0, 62.85], [30.0, 62.4]]],
+            },
+            "timeframe": "24h",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["raw_data"]["osm-poi"]["feature_count"] == 1
+    assert payload["raw_data"]["osm-poi"]["collections"][0]["collection"] == "education"
+    assert payload["raw_data"]["opencellid"]["feature_count"] == 1
+    assert payload["metrics"]["feature_counts_by_source"]["osm-poi"] == 1
+    assert payload["metrics"]["feature_counts_by_source"]["opencellid"] == 1
+    assert payload["metrics"]["feature_counts_by_category"]["infrastructure"] == 1
+    assert payload["metrics"]["feature_counts_by_category"]["other"] == 1
+    assert payload["metrics"]["geometry_counts"]["Point"] == 2
+    assert any(section["source_id"] == "osm-poi" for section in payload["raw_sections"])
+    assert any(section["source_id"] == "opencellid" for section in payload["raw_sections"])

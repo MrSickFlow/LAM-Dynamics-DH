@@ -90,13 +90,17 @@ class SatelliteTleAdapter(SourceAdapter):
     async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
         center = self._resolve_center(area)
         satellite_info: dict[str, dict[str, Any]] = {}
+        fetch_errors: dict[str, str] = {}
+        successful_fetches = 0
 
         async with httpx.AsyncClient(timeout=30.0, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
             for tle_url in TLE_URLS:
                 try:
                     resp = await client.get(tle_url)
                     if resp.status_code != 200:
+                        fetch_errors[tle_url] = f"HTTP {resp.status_code}"
                         continue
+                    successful_fetches += 1
                     raw = resp.text.strip().split("\n")
                     for i in range(0, len(raw) - 2, 3):
                         name = raw[i].strip().replace("\r", "")
@@ -111,8 +115,16 @@ class SatelliteTleAdapter(SourceAdapter):
                                 "tle_line_1": line1,
                                 "tle_line_2": line2,
                             }
-                except Exception:
+                except Exception as exc:
+                    fetch_errors[tle_url] = str(exc)
                     continue
+
+        if successful_fetches == 0:
+            error_summary = "; ".join(
+                f"{url}: {error}"
+                for url, error in list(fetch_errors.items())[:3]
+            )
+            raise ValueError(f"Satellite TLE fetch failed for all feeds ({error_summary})")
 
         now = datetime.now(timezone.utc)
         for name, info in satellite_info.items():
@@ -136,6 +148,7 @@ class SatelliteTleAdapter(SourceAdapter):
                     "lon": center["lon"],
                     "timeframe": timeframe,
                 },
+                "errors": fetch_errors,
                 "satellites": satellite_info,
                 "total_tracked": len(satellite_info),
             },

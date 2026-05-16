@@ -16,7 +16,17 @@ from ipb_backend.ingestion.sources.opencellid import OpenCellIdAdapter
 from ipb_backend.ingestion.sources.osm_poi import OsmPoiAdapter
 from ipb_backend.ingestion.sources.satellites import SatelliteTleAdapter
 from ipb_backend.ingestion.sources.statistics_finland import StatisticsFinlandAdapter
-from ipb_backend.models import SourceCategory, SourceDefinition
+from ipb_backend.models import SourceCategory, SourceDefinition, SourceStatus
+
+
+def _credential_gated_source(*, configured: bool, error_message: str) -> dict:
+    if configured:
+        return {}
+    return {
+        "enabled": False,
+        "status": SourceStatus.DISABLED,
+        "last_error": error_message,
+    }
 
 
 def build_registry() -> SourceRegistry:
@@ -35,6 +45,10 @@ def build_registry() -> SourceRegistry:
                 category=SourceCategory.TERRAIN,
                 description="Topographic, elevation, and land cover datasets.",
                 refresh_interval_seconds=86400,
+                **_credential_gated_source(
+                    configured=bool(settings.nls_api_key),
+                    error_message="Disabled until NLS_API_KEY is configured.",
+                ),
             ),
             SourceDefinition(
                 source_id="statistics-finland",
@@ -56,6 +70,10 @@ def build_registry() -> SourceRegistry:
                 category=SourceCategory.INFRASTRUCTURE,
                 description="Cell tower locations, operators, and technologies.",
                 refresh_interval_seconds=86400,
+                **_credential_gated_source(
+                    configured=bool(settings.opencellid_api_key),
+                    error_message="Disabled until OPENCELLID_API_KEY is configured.",
+                ),
             ),
             SourceDefinition(
                 source_id="osm-poi",

@@ -116,9 +116,99 @@ def _clip_feature_dataset(record, mask, feature_limit: int = 30):
     }
 
 
+def _clip_osm_poi_record(record, mask, feature_limit: int = 30):
+    features = []
+    category_features = []
+
+    for category_id, items in record.data.get("categories", {}).items():
+        label = category_id.replace("_", " ").title()
+        category_count = 0
+        for item in items:
+            lat = item.get("lat")
+            lon = item.get("lon")
+            if lat is None or lon is None:
+                continue
+
+            feature = {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [lon, lat],
+                },
+                "properties": {
+                    "id": item.get("id"),
+                    "osm_type": item.get("type"),
+                    **item.get("tags", {}),
+                },
+            }
+            clipped = clip_geojson_feature(feature, mask)
+            if clipped is None:
+                continue
+
+            props = clipped.setdefault("properties", {})
+            props["_collection"] = category_id
+            props["_label"] = label
+            category_count += 1
+            features.append(clipped)
+
+        if category_count:
+            category_features.append(
+                {
+                    "collection": category_id,
+                    "label": label,
+                    "count": category_count,
+                }
+            )
+
+    return {
+        "summary": record.summary,
+        "feature_count": len(features),
+        "collections": category_features,
+        "features": features[:feature_limit],
+    }
+
+
+def _clip_cell_tower_record(record, mask, feature_limit: int = 30):
+    features = []
+
+    for cell in record.data.get("cells", []):
+        lat = cell.get("lat")
+        lon = cell.get("lon")
+        if lat is None or lon is None:
+            continue
+
+        feature = {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [lon, lat],
+            },
+            "properties": {
+                "cell_id": cell.get("cellid") or cell.get("cellId"),
+                "radio": cell.get("radio"),
+                "mcc": cell.get("mcc"),
+                "mnc": cell.get("mnc"),
+                "lac": cell.get("lac"),
+                "samples": cell.get("samples"),
+                "range": cell.get("range"),
+            },
+        }
+        clipped = clip_geojson_feature(feature, mask)
+        if clipped is None:
+            continue
+        features.append(clipped)
+
+    return {
+        "summary": record.summary,
+        "feature_count": len(features),
+        "features": features[:feature_limit],
+    }
+
+
 def _clip_population_dataset(record, mask, feature_limit: int = 30):
     features = []
     population_total = 0
+    source_population_total = int(record.data.get("population_total", 0) or 0)
 
     for feature in record.data.get("features", []):
         clipped = clip_geojson_feature(feature, mask)
@@ -131,10 +221,18 @@ def _clip_population_dataset(record, mask, feature_limit: int = 30):
         except Exception:
             continue
 
-        if source_geometry.is_empty or clipped_geometry.is_empty or source_geometry.area <= 0:
+        if (
+            source_geometry.is_empty
+            or clipped_geometry.is_empty
+            or source_geometry.area <= 0
+            or clipped_geometry.area <= 0
+        ):
             continue
 
         overlap_ratio = clipped_geometry.area / source_geometry.area
+        if overlap_ratio <= 0:
+            continue
+
         source_population = int(feature.get("properties", {}).get("population", 0) or 0)
         estimated_population = round(source_population * overlap_ratio)
         if source_population > 0 and estimated_population == 0:
@@ -151,6 +249,8 @@ def _clip_population_dataset(record, mask, feature_limit: int = 30):
         "summary": record.summary,
         "feature_count": len(features),
         "population_total": population_total,
+        "population_source_total": source_population_total,
+        "population_coverage_ratio": round(population_total / source_population_total, 4) if source_population_total else 0,
         "features": features[:feature_limit],
     }
 
@@ -203,6 +303,10 @@ def _clip_record_for_aoi(record: DatasetRecord, mask, source_name: Optional[str]
         payload = _clip_nls_record(record, mask)
     elif record.data.get("station") or record.data.get("observations"):
         payload = _clip_weather_record(record, mask)
+    elif record.data.get("categories"):
+        payload = _clip_osm_poi_record(record, mask)
+    elif record.data.get("cells"):
+        payload = _clip_cell_tower_record(record, mask)
     elif record.data.get("features") and _is_population_dataset(record):
         payload = _clip_population_dataset(record, mask)
     elif record.data.get("features"):
@@ -251,7 +355,10 @@ async def list_sources(services=Depends(get_services)):
 
 @router.post("/ingest")
 async def ingest(request: IngestionRequest, services=Depends(get_services)):
-    return await services["ingestion_service"].ingest(request)
+    try:
+        return await services["ingestion_service"].ingest(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/datasets")
@@ -332,7 +439,18 @@ async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_
     records = services["ingestion_service"].records
     nls_record = next((r for r in records if r.source_id == "nls" and r.area == area), None)
     if nls_record is None:
-        return {"type": "FeatureCollection", "features": []}
+        return {"type": "FeatureCollection", "features": [], "available": False, "reason": "missing"}
+
+    note = str(nls_record.data.get("note", "") or "")
+    if "Demo spatial fallback" in note:
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "available": False,
+            "reason": "demo-fallback",
+            "message": "NLS vector overlays are disabled because NLS_API_KEY is not configured.",
+        }
+
     collections = nls_record.data.get("collections", {})
     features = []
     for coll_id, coll_data in collections.items():
@@ -347,7 +465,7 @@ async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_
                     "geometry": sample["geometry"],
                     "properties": props,
                 })
-    return {"type": "FeatureCollection", "features": features}
+    return {"type": "FeatureCollection", "features": features, "available": True}
 
 
 @router.get("/weather/point")

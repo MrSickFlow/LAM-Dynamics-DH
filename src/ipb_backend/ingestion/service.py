@@ -20,6 +20,11 @@ class IngestionService:
 
     async def ingest(self, request: IngestionRequest) -> IngestionResult:
         source_ids = request.source_ids or self._registry.enabled_source_ids()
+        missing_source_ids = self._registry.missing_source_ids(source_ids)
+        if missing_source_ids:
+            missing_list = ", ".join(sorted(missing_source_ids))
+            raise ValueError(f"Unknown source ids: {missing_list}")
+
         tasks = [self._fetch_one(source_id, request.area, request.timeframe) for source_id in source_ids]
         records = [record for record in await asyncio.gather(*tasks) if record is not None]
         self._records.extend(records)
@@ -30,7 +35,10 @@ class IngestionService:
         if not definition.enabled:
             return None
 
-        adapter = self._adapters[source_id]
+        adapter = self._adapters.get(source_id)
+        if adapter is None:
+            raise ValueError(f"No adapter configured for source id: {source_id}")
+
         try:
             record = await adapter.fetch(area, timeframe)
             updated_definition = definition.model_copy(

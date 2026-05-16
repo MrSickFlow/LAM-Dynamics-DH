@@ -13,6 +13,9 @@ class SourceRegistry:
     def get(self, source_id: str) -> SourceDefinition:
         return self._definitions[source_id]
 
+    def missing_source_ids(self, source_ids: list[str]) -> list[str]:
+        return [source_id for source_id in source_ids if source_id not in self._definitions]
+
     def enabled_source_ids(self) -> list[str]:
         return [source_id for source_id, definition in self._definitions.items() if definition.enabled]
 

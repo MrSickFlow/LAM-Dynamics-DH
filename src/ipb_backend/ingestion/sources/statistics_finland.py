@@ -29,31 +29,36 @@ MUNICIPALITY_LABELS: dict[str, str] = {
     "KU698": "Rovaniemi",
 }
 
-AREA_POPULATION_CENTERS = {
-    "north karelia": [
-        (0.31, 0.40, 1.0, 0.11),
-        (0.43, 0.83, 0.28, 0.12),
-        (0.44, 0.12, 0.24, 0.10),
-    ],
-    "archipelago sea": [
-        (0.44, 0.48, 0.85, 0.14),
-        (0.68, 0.42, 0.30, 0.10),
-    ],
-    "lapland": [
-        (0.48, 0.34, 0.95, 0.13),
-        (0.30, 0.58, 0.35, 0.12),
-        (0.68, 0.62, 0.30, 0.12),
-    ],
-    "lapland (kasivarren lappi)": [
-        (0.48, 0.34, 0.95, 0.13),
-        (0.30, 0.58, 0.35, 0.12),
-        (0.68, 0.62, 0.30, 0.12),
-    ],
-    "kasivarren lappi": [
-        (0.48, 0.34, 0.95, 0.13),
-        (0.30, 0.58, 0.35, 0.12),
-        (0.68, 0.62, 0.30, 0.12),
-    ],
+AREA_MUNICIPALITY_HOTSPOTS: dict[str, dict[str, list[tuple[float, float, float, float]]]] = {
+    "north karelia": {
+        "KU167": [(0.305, 0.405, 1.0, 0.025), (0.275, 0.385, 0.18, 0.022), (0.335, 0.425, 0.12, 0.022)],
+        "KU176": [(0.105, 0.815, 1.0, 0.06)],
+        "KU260": [(0.445, 0.085, 1.0, 0.06)],
+        "KU422": [(0.415, 0.885, 1.0, 0.065)],
+        "KU426": [(0.155, 0.355, 1.0, 0.05)],
+        "KU276": [(0.335, 0.505, 1.0, 0.05)],
+    },
+    "archipelago sea": {
+        "KU445": [(0.44, 0.48, 1.0, 0.09), (0.68, 0.42, 0.28, 0.07)],
+    },
+    "lapland": {
+        "KU698": [(0.48, 0.34, 1.0, 0.085), (0.30, 0.58, 0.24, 0.08), (0.68, 0.62, 0.18, 0.08)],
+    },
+    "lapland (kasivarren lappi)": {
+        "KU698": [(0.48, 0.34, 1.0, 0.085), (0.30, 0.58, 0.24, 0.08), (0.68, 0.62, 0.18, 0.08)],
+    },
+    "kasivarren lappi": {
+        "KU698": [(0.48, 0.34, 1.0, 0.085), (0.30, 0.58, 0.24, 0.08), (0.68, 0.62, 0.18, 0.08)],
+    },
+}
+
+AREA_PRIORITY_ZONES: dict[str, dict[str, list[tuple[float, float, float, float, float]]]] = {
+    "north karelia": {
+        "KU167": [
+            (0.272, 0.373, 0.392, 0.467, 8.0),
+            (0.248, 0.347, 0.424, 0.505, 2.0),
+        ],
+    },
 }
 
 
@@ -123,7 +128,7 @@ class StatisticsFinlandAdapter(SourceAdapter):
         pop_data = self._extract_population(total_data, municipalities)
         age_dist = self._extract_age_distribution(age_data, all_ages, municipalities)
         pop_data["age_distribution"] = age_dist
-        features = self._build_features(area, bbox, pop_data["total"])
+        features = self._build_features(area, bbox, pop_data)
         pop_data["population_total"] = pop_data["total"]
         pop_data["urban_rural"] = urban_rural
 
@@ -276,15 +281,18 @@ class StatisticsFinlandAdapter(SourceAdapter):
         self,
         area: str,
         bbox: tuple[float, float, float, float],
-        target_population: int,
+        pop_data: dict[str, Any],
     ) -> list[dict]:
         min_x, min_y, max_x, max_y = bbox
         width = max_x - min_x
         height = max_y - min_y
         area_name = self._normalize_area(area)
-        centers = AREA_POPULATION_CENTERS.get(area_name, AREA_POPULATION_CENTERS["north karelia"])
-        columns = 10
-        rows = 10
+        municipality_layout = AREA_MUNICIPALITY_HOTSPOTS.get(area_name, AREA_MUNICIPALITY_HOTSPOTS["north karelia"])
+        priority_zones = AREA_PRIORITY_ZONES.get(area_name, {})
+        target_population = int(pop_data.get("total", 0) or 0)
+        per_muni = pop_data.get("per_muni", {})
+        columns = 24
+        rows = 24
 
         def ring(x0: float, y0: float, x1: float, y1: float) -> list[list[float]]:
             return [[
@@ -316,10 +324,24 @@ class StatisticsFinlandAdapter(SourceAdapter):
                 center_x = (x0 + x1) / 2
                 center_y = (y0 + y1) / 2
 
-                weight = 0.08 + (0.12 * (1.0 - center_y))
-                for hotspot_x, hotspot_y, scale, spread in centers:
-                    distance_sq = (center_x - hotspot_x) ** 2 + (center_y - hotspot_y) ** 2
-                    weight += scale * math.exp(-(distance_sq / (2 * spread * spread)))
+                weight = 0.002
+                for municipality_code, municipality_data in per_muni.items():
+                    municipality_total = int(municipality_data.get("total", 0) or 0)
+                    if municipality_total <= 0:
+                        continue
+
+                    hotspots = municipality_layout.get(municipality_code)
+                    if not hotspots:
+                        continue
+
+                    municipality_share = municipality_total / target_population if target_population else 0.0
+                    for hotspot_x, hotspot_y, scale, spread in hotspots:
+                        distance_sq = (center_x - hotspot_x) ** 2 + (center_y - hotspot_y) ** 2
+                        weight += municipality_share * scale * math.exp(-(distance_sq / (2 * spread * spread)))
+
+                    for zone_x0, zone_y0, zone_x1, zone_y1, boost in priority_zones.get(municipality_code, []):
+                        if zone_x0 <= center_x <= zone_x1 and zone_y0 <= center_y <= zone_y1:
+                            weight += municipality_share * boost
 
                 weighted_cells.append(
                     {

@@ -873,6 +873,9 @@
       },
     ];
 
+    const WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad"];
+    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["tieviiva", "rakennus", "jarvi", "virtavesialue", "weather"]);
+
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
       rakennus: { color: "#195d85", weight: 1.5, fillOpacity: 0.45 },
@@ -1098,7 +1101,7 @@
           const el = document.createElement("label");
           el.className = "overlay-item";
           el.innerHTML = `
-            <input type="checkbox" checked data-collection="weather" />
+            <input type="checkbox" ${DEFAULT_VISIBLE_COLLECTIONS.has("weather") ? "checked" : ""} data-collection="weather" />
             <span class="overlay-swatch" style="background:#c46c32"></span>
             <span>Current Weather (station)</span>
           `;
@@ -1138,7 +1141,7 @@
       const label = document.createElement("label");
       label.className = "overlay-item";
       label.innerHTML = `
-        <input type="checkbox" checked data-collection="${item.id}" />
+        <input type="checkbox" ${DEFAULT_VISIBLE_COLLECTIONS.has(item.id) ? "checked" : ""} data-collection="${item.id}" />
         <span class="overlay-swatch" style="background:${item.color}"></span>
         <span>${item.label}</span>
       `;
@@ -1167,11 +1170,33 @@
       }
     }
 
+    function setNlsOverlayAvailability(available, message = "") {
+      NLS_COLLECTIONS.forEach((collection) => {
+        const checkbox = document.querySelector(`input[data-collection="${collection.id}"]`);
+        if (!checkbox) return;
+        checkbox.disabled = !available;
+        checkbox.title = available ? "" : message;
+        if (!available) checkbox.checked = false;
+        if (!available && state.collectionLayers[collection.id]) {
+          state.map.removeLayer(state.collectionLayers[collection.id]);
+        }
+      });
+    }
+
     async function loadMapData() {
       try {
         const response = await fetch(`/api/map-data/nls?area=${encodeURIComponent(state.bootstrapArea)}`);
         const geojson = await response.json();
         Object.values(state.collectionLayers).forEach((layer) => layer.clearLayers());
+
+        if (geojson.available === false) {
+          const message = geojson.message || "NLS vector overlays are unavailable.";
+          setNlsOverlayAvailability(false, message);
+          statusLine.textContent = message;
+          return;
+        }
+
+        setNlsOverlayAvailability(true);
 
         const grouped = {};
         geojson.features.forEach((feature) => {
@@ -1190,6 +1215,7 @@
         });
       } catch (error) {
         console.error("Map data load failed:", error);
+        setNlsOverlayAvailability(false, "Base NLS overlays could not be refreshed.");
         statusLine.textContent = "Base NLS overlays could not be refreshed.";
       }
     }
@@ -1215,6 +1241,10 @@
     }
 
     function getObsValue(obs, key) { return obs?.[key]?.latest?.value; }
+
+    function formatNumber(value, options = undefined) {
+      return typeof value === "number" ? value.toLocaleString(undefined, options) : value;
+    }
 
     function renderWeather() {
       const pw = state.pointWeatherData;
@@ -1277,11 +1307,11 @@
 
     function renderMetrics(metrics) {
       const items = [
-        { label: "AOI Area", value: metrics ? `${metrics.selection_area_sqkm} km2` : "--" },
-        { label: "NLS Features", value: metrics ? metrics.nls_feature_count : "--" },
-        { label: "Transport", value: metrics ? metrics.digiroad_feature_count : "--" },
-        { label: "Population", value: metrics ? metrics.population_total : "--" },
-        { label: "Weather Stations", value: metrics ? metrics.weather_station_count : "--" },
+        { label: "AOI Area", value: metrics ? `${formatNumber(metrics.selection_area_sqkm, { maximumFractionDigits: 2 })} km2` : "--" },
+        { label: "NLS Features", value: metrics ? formatNumber(metrics.nls_feature_count) : "--" },
+        { label: "Transport", value: metrics ? formatNumber(metrics.digiroad_feature_count) : "--" },
+        { label: "Population", value: metrics ? formatNumber(metrics.population_total) : "--" },
+        { label: "Weather Stations", value: metrics ? formatNumber(metrics.weather_station_count) : "--" },
       ];
 
       metricsGrid.innerHTML = "";
@@ -1502,6 +1532,8 @@
         return {
           summary: sourcePayload.summary,
           population_total: sourcePayload.population_total,
+          population_source_total: sourcePayload.population_source_total,
+          population_coverage_ratio: sourcePayload.population_coverage_ratio,
           feature_count: sourcePayload.feature_count,
           cells: (sourcePayload.features || []).slice(0, 4).map((feature) => feature.properties || {}),
         };
@@ -1572,13 +1604,21 @@
       state.map.getContainer().style.cursor = "";
 
       try {
-        await fetch("/api/ingest", {
+        const ingestResponse = await fetch("/api/ingest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ area: state.bootstrapArea, timeframe: state.timeframe }),
+          body: JSON.stringify({
+            area: state.bootstrapArea,
+            timeframe: state.timeframe,
+            source_ids: WORKSPACE_SOURCE_IDS,
+          }),
         });
+        if (!ingestResponse.ok) {
+          throw new Error(`Workspace ingest failed with ${ingestResponse.status}`);
+        }
       } catch (error) {
         console.error("Ingest failed:", error);
+        statusLine.textContent = "Workspace refresh failed.";
       }
 
       try {
@@ -1587,6 +1627,11 @@
           fetch("/api/sources"),
           fetch("/api/analysis/health"),
         ]);
+
+        if (!datasetsResponse.ok || !sourcesResponse.ok) {
+          throw new Error("Workspace data requests failed");
+        }
+
         const datasets = await datasetsResponse.json();
         state.sources = await sourcesResponse.json();
         state.analysisHealth = analysisHealthResponse.ok ? await analysisHealthResponse.json() : {
@@ -1603,17 +1648,21 @@
 
         if (state.selectionGeometry) {
           await inspectSelection(state.selectionGeometry);
-        } else {
+        } else if (datasets.length) {
           renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
-          statusLine.textContent = "Datasets ready. Shift + drag on the map to inspect an AOI.";
+          if (!state.sources.some((source) => source.source_id === "nls" && source.status === "disabled")) {
+            statusLine.textContent = "Datasets ready. Shift + drag on the map to inspect an AOI.";
+          }
         }
       } catch (error) {
         console.error(error);
-        statusLine.textContent = "Could not load workspace data.";
+        if (statusLine.textContent !== "Workspace refresh failed.") {
+          statusLine.textContent = "Could not load workspace data.";
+        }
+      } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = "Refresh Data";
       }
-
-      refreshBtn.disabled = false;
-      refreshBtn.textContent = "Refresh Data";
     }
 
     function clearSelection() {

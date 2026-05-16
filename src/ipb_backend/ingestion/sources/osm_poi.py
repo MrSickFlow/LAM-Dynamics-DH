@@ -75,6 +75,7 @@ class OsmPoiAdapter(SourceAdapter):
         bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
 
         categories: dict[str, list[dict[str, Any]]] = {}
+        category_errors: dict[str, str] = {}
         total = 0
 
         async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
@@ -86,10 +87,18 @@ class OsmPoiAdapter(SourceAdapter):
                     data = resp.json()
                     pois = [_feature_to_poi(el, cat_name) for el in data.get("elements", [])]
                 except Exception as e:
-                    pois = [{"error": str(e)}]
+                    pois = []
+                    category_errors[cat_name] = str(e)
 
                 categories[cat_name] = pois
                 total += len(pois)
+
+        if category_errors and len(category_errors) == len(CATEGORY_QUERIES):
+            error_summary = "; ".join(
+                f"{category}: {error}"
+                for category, error in list(category_errors.items())[:3]
+            )
+            raise ValueError(f"OSM POI fetch failed for all categories ({error_summary})")
 
         provider = "OpenStreetMap contributors (ODbL)"
         return DatasetRecord(
@@ -104,6 +113,7 @@ class OsmPoiAdapter(SourceAdapter):
                 "license": "ODbL",
                 "query": {"area": area, "bbox": bbox_str},
                 "categories": {k: v for k, v in sorted(categories.items())},
+                "errors": category_errors,
                 "total_features": total,
             },
         )
