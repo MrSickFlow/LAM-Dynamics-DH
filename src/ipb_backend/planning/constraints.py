@@ -314,6 +314,21 @@ def check_constraints(
             )
         )
 
+    heaviest_arty = force.heaviest_artillery_t
+    if heaviest_arty > 0 and cell_features.min_bridge_capacity_t is not None:
+        passed = cell_features.min_bridge_capacity_t >= heaviest_arty
+        matches.append(
+            ConstraintMatch(
+                name="bridge_weight_artillery",
+                passed=passed,
+                observed=round(cell_features.min_bridge_capacity_t, 1),
+                required=round(heaviest_arty, 1),
+                detail=(
+                    f"Bridge capacity {cell_features.min_bridge_capacity_t:.1f} t vs heaviest artillery {heaviest_arty:.1f} t"
+                ),
+            )
+        )
+
     widest = force.widest_vehicle_m
     if widest > 0 and cell_features.max_road_width_m is not None:
         required = widest * (2.2 if force.column_movement else 1.2)
