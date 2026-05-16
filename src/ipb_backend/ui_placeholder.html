@@ -1305,6 +1305,17 @@
         </div>
       </div>
 
+      <div class="section is-collapsible is-collapsed" data-section id="point-snapshot-section" style="display:none">
+        <button class="section-toggle" type="button" aria-expanded="false">
+          <div class="section-header">Point Snapshot</div>
+          <span class="collapse-icon">▾</span>
+        </button>
+        <div class="section-body">
+          <p class="subhead" id="point-snapshot-coords" style="margin:0 0 10px"></p>
+          <div id="point-snapshot-content"></div>
+        </div>
+      </div>
+
       <div class="section is-collapsible is-collapsed" data-section>
         <button class="section-toggle" type="button" aria-expanded="false">
           <div class="section-header">AOI Metrics</div>
@@ -1380,7 +1391,9 @@
       weatherMarker: null,
       pointMarker: null,
       weatherPickerActive: false,
+      pointInspectorActive: false,
       pointWeatherData: null,
+      pointSnapshot: null,
       selectionLayer: null,
       selectionGeometry: null,
       latestInspection: null,
@@ -1796,6 +1809,13 @@
         }
         if (state.draw.active) finishDrawing();
       });
+
+      state.map.on("click", (event) => {
+        if (state.draw.active || state.loadSelection.enabled || state.loadSelection.dragging) return;
+        if (state.pointInspectorActive) {
+          fetchPointInspect(event.latlng.lat, event.latlng.lng);
+        }
+      });
     }
 
     function beginLoadRectangleMode() {
@@ -2004,16 +2024,17 @@
           pickerEl.style.marginTop = "4px";
           pickerEl.innerHTML = `
             <input type="checkbox" data-action="weather-picker" />
-            <span class="overlay-swatch" style="background:#c46c32"></span>
-            <span>Weather Picker <span style="font-weight:400;color:var(--muted)">(click map)</span></span>
+            <span class="overlay-swatch" style="background:#195d85"></span>
+            <span>Point Inspector <span style="font-weight:400;color:var(--muted)">(click map)</span></span>
           `;
           pickerEl.querySelector("input").addEventListener("change", (e) => {
             state.weatherPickerActive = e.target.checked;
-            if (!state.weatherPickerActive && state.pointMarker) {
+            state.pointInspectorActive = e.target.checked;
+            if (!state.pointInspectorActive && state.pointMarker) {
               state.map.removeLayer(state.pointMarker);
               state.pointMarker = null;
             }
-            state.map.getContainer().style.cursor = state.weatherPickerActive ? "crosshair" : "";
+            state.map.getContainer().style.cursor = state.pointInspectorActive ? "crosshair" : "";
           });
           body.appendChild(pickerEl);
         }
@@ -2303,6 +2324,98 @@
         console.error("Point weather fetch failed:", e);
         statusLine.textContent = "Weather fetch failed";
       }
+    }
+
+    async function fetchPointInspect(lat, lng) {
+      statusLine.textContent = `Inspecting point (${lat.toFixed(4)}, ${lng.toFixed(4)})...`;
+      try {
+        const resp = await fetch("/api/point/inspect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lat, lon: lng, timeframe: state.timeframe || "24h" }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        state.pointSnapshot = await resp.json();
+
+        if (state.pointMarker) state.map.removeLayer(state.pointMarker);
+        state.pointMarker = L.circleMarker([lat, lng], {
+          radius: 10, fillColor: "#195d85", color: "#fff", weight: 3, fillOpacity: 0.85,
+        }).addTo(state.map).bindPopup(`<b>Point Inspector</b><br>${state.pointSnapshot.summary}`).openPopup();
+
+        renderPointInspect(state.pointSnapshot);
+        statusLine.textContent = `Point snapshot complete for (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+      } catch (e) {
+        console.error("Point inspection failed:", e);
+        statusLine.textContent = "Point inspection failed";
+      }
+    }
+
+    function renderPointInspect(data) {
+      const section = document.getElementById("point-snapshot-section");
+      const coords = document.getElementById("point-snapshot-coords");
+      const content = document.getElementById("point-snapshot-content");
+      if (!section || !coords || !content) return;
+
+      coords.textContent = `${data.lat.toFixed(5)}, ${data.lon.toFixed(5)}`;
+
+      const terrain = data.terrain || {};
+      const obs = data.weather?.observations?.observations || {};
+      const fc = data.weather?.forecast?.observations || {};
+      const nearby = data.nearby_context || {};
+
+      const getObs = (key) => obs[key]?.latest?.value ?? fc[key]?.latest?.value;
+
+      const rows = [];
+
+      if (terrain.available && terrain.elevation_m != null) {
+        rows.push({ label: "Elevation", value: `${terrain.elevation_m} m`, source: "NLS 2m DEM" });
+      } else {
+        rows.push({ label: "Elevation", value: "N/A", source: terrain.available === false ? "NLS DEM unavailable" : "" });
+      }
+
+      const temp = getObs("temperature");
+      const wind = getObs("wind_speed");
+      const vis  = getObs("visibility");
+      const cloud = getObs("cloud_cover");
+      const precip = getObs("precipitation");
+
+      if (temp != null) rows.push({ label: "Temperature", value: `${temp} °C` });
+      if (wind != null) rows.push({ label: "Wind speed",  value: `${wind} m/s` });
+      if (vis  != null) rows.push({ label: "Visibility",  value: `${(vis / 1000).toFixed(1)} km` });
+      if (cloud != null) {
+        const cv = (typeof cloud === "number" && cloud <= 8) ? `${cloud}/8 okta` : `${cloud}%`;
+        rows.push({ label: "Cloud cover", value: cv });
+      }
+      if (precip != null) rows.push({ label: "Precipitation", value: `${precip} mm/h` });
+
+      const towers = nearby.cell_towers_within_radius;
+      if (towers != null) rows.push({ label: "Cell towers (2 km)", value: String(towers) });
+
+      const poiCounts = nearby.poi_counts || {};
+      const poiTotal = Object.values(poiCounts).reduce((a, b) => a + b, 0);
+      if (poiTotal) rows.push({ label: "POIs (2 km)", value: String(poiTotal) });
+
+      const los = data.los || {};
+      rows.push({ label: "LOS analysis", value: los.available ? "Available" : "Unavailable", source: los.note || "" });
+
+      content.innerHTML = "";
+      const grid = document.createElement("div");
+      grid.className = "metrics-grid";
+      rows.forEach(({ label, value, source }) => {
+        const card = document.createElement("div");
+        card.className = "metric-card";
+        card.innerHTML = `<div class="metric-value">${value}</div><div class="metric-label">${label}</div>`;
+        if (source) card.title = source;
+        grid.appendChild(card);
+      });
+      content.appendChild(grid);
+
+      // expand the section
+      section.style.display = "";
+      section.classList.remove("is-collapsed");
+      const toggle = section.querySelector(".section-toggle");
+      if (toggle) toggle.setAttribute("aria-expanded", "true");
+      section.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
 
     function getObsValue(obs, key) { return obs?.[key]?.latest?.value; }
@@ -2910,8 +3023,12 @@
       await ensureAnalysisProfilesLoaded();
       state.workspaceArea = state.loadTarget?.label || state.bootstrapArea;
       state.pointWeatherData = null;
+      state.pointSnapshot = null;
       state.weatherPickerActive = false;
+      state.pointInspectorActive = false;
       if (state.pointMarker) { state.map.removeLayer(state.pointMarker); state.pointMarker = null; }
+      const pointSnapshotSection = document.getElementById("point-snapshot-section");
+      if (pointSnapshotSection) pointSnapshotSection.style.display = "none";
       state.timeframe = timeframeInput.value.trim() || "72h";
 
       refreshBtn.disabled = true;

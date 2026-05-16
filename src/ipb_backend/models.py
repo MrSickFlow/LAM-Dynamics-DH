@@ -108,6 +108,28 @@ class UiPlaceholderResponse(BaseModel):
     dashboard_cards: list[str]
 
 
+class TerrainSnapshot(BaseModel):
+    elevation_m: Optional[float] = None
+    elevation_source: str = "nls_dem_2m"
+    available: bool = False
+
+
+class PointInspectionRequest(BaseModel):
+    lat: float
+    lon: float
+    timeframe: str = "24h"
+
+
+class PointInspectionResponse(BaseModel):
+    lat: float
+    lon: float
+    terrain: TerrainSnapshot
+    weather: dict[str, Any]
+    nearby_context: dict[str, Any]
+    los: dict[str, Any]
+    summary: str
+
+
 class AgentDefinition(BaseModel):
     agent_id: str
     name: str

@@ -1288,3 +1288,73 @@ def test_aoi_interpret_accepts_question_and_history():
     payload = response.json()
     assert payload["profile"] == "mobility"
     assert payload["summary"]  # non-empty summary returned
+
+
+# ───────────────────────── point inspect ─────────────────────────
+
+def test_point_inspect_returns_required_fields():
+    response = client.post(
+        "/api/point/inspect",
+        json={"lat": 62.6, "lon": 29.8, "timeframe": "24h"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["lat"] == 62.6
+    assert payload["lon"] == 29.8
+    assert "terrain" in payload
+    assert "weather" in payload
+    assert "nearby_context" in payload
+    assert "los" in payload
+    assert "summary" in payload
+    assert isinstance(payload["summary"], str)
+
+
+def test_point_inspect_terrain_schema():
+    response = client.post(
+        "/api/point/inspect",
+        json={"lat": 62.6, "lon": 29.8},
+    )
+    assert response.status_code == 200
+    terrain = response.json()["terrain"]
+    assert "elevation_m" in terrain
+    assert "elevation_source" in terrain
+    assert isinstance(terrain["available"], bool)
+
+
+def test_point_inspect_los_is_stub():
+    response = client.post(
+        "/api/point/inspect",
+        json={"lat": 62.6, "lon": 29.8},
+    )
+    assert response.status_code == 200
+    los = response.json()["los"]
+    assert los["available"] is False
+    assert "note" in los
+
+
+def test_point_inspect_nearby_context_schema():
+    response = client.post(
+        "/api/point/inspect",
+        json={"lat": 62.6, "lon": 29.8},
+    )
+    assert response.status_code == 200
+    nearby = response.json()["nearby_context"]
+    assert "search_radius_km" in nearby
+    assert "poi_counts" in nearby
+    assert "cell_towers_within_radius" in nearby
+
+
+# ───────────────────────── elevation provider ─────────────────────────
+
+def test_unavailable_elevation_provider_returns_none():
+    import asyncio
+    from ipb_backend.terrain.elevation import UnavailableElevationProvider
+    provider = UnavailableElevationProvider()
+    result = asyncio.run(provider.get_elevation(62.6, 29.8))
+    assert result is None
+
+
+def test_build_elevation_provider_without_key_is_unavailable():
+    from ipb_backend.terrain.elevation import build_elevation_provider, UnavailableElevationProvider
+    provider = build_elevation_provider("")
+    assert isinstance(provider, UnavailableElevationProvider)

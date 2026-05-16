@@ -36,7 +36,10 @@ from ipb_backend.models import (
     DatasetRecord,
     AgentDefinition,
     IngestionRequest,
+    PointInspectionRequest,
+    PointInspectionResponse,
     SourceCategory,
+    TerrainSnapshot,
     UiLayer,
     UiPlaceholderResponse,
 )
@@ -765,6 +768,98 @@ async def weather_point(lat: float = Query(...), lon: float = Query(...), timefr
         return {"error": "FMI adapter not available"}
     result = await adapter.fetch_point_weather(lat, lon, timeframe)
     return result
+
+
+def _nearby_context(lat: float, lon: float, records) -> dict[str, Any]:
+    RADIUS_DEG = 0.018  # ~2 km at 60 °N
+    poi_counts: dict[str, int] = {}
+    cell_towers = 0
+
+    for record in records:
+        if record.source_id == "osm-poi":
+            for cat_id, items in record.data.get("categories", {}).items():
+                for item in items:
+                    ilat = item.get("lat")
+                    ilon = item.get("lon")
+                    if ilat is None or ilon is None:
+                        continue
+                    if ((ilon - lon) ** 2 + (ilat - lat) ** 2) ** 0.5 <= RADIUS_DEG:
+                        poi_counts[cat_id] = poi_counts.get(cat_id, 0) + 1
+        elif record.source_id == "opencellid":
+            for cell in record.data.get("cells", []):
+                clat = cell.get("lat")
+                clon = cell.get("lon")
+                if clat is None or clon is None:
+                    continue
+                if ((clon - lon) ** 2 + (clat - lat) ** 2) ** 0.5 <= RADIUS_DEG:
+                    cell_towers += 1
+
+    return {
+        "search_radius_km": 2.0,
+        "poi_counts": poi_counts,
+        "cell_towers_within_radius": cell_towers,
+    }
+
+
+async def _build_point_snapshot(lat: float, lon: float, timeframe: str, services) -> dict[str, Any]:
+    from ipb_backend.terrain.elevation import build_elevation_provider
+
+    elevation_provider = build_elevation_provider(settings.nls_api_key)
+    elevation_m = await elevation_provider.get_elevation(lat, lon)
+    terrain = TerrainSnapshot(
+        elevation_m=elevation_m,
+        elevation_source="nls_dem_2m",
+        available=elevation_m is not None,
+    )
+
+    weather: dict[str, Any] = {}
+    fmi: FmiAdapter = services["adapters"].get("fmi")
+    if fmi:
+        try:
+            weather = await fmi.fetch_point_weather(lat, lon, timeframe)
+        except Exception:
+            weather = {}
+
+    nearby = _nearby_context(lat, lon, services["ingestion_service"].records)
+
+    los: dict[str, Any] = {
+        "available": False,
+        "note": "Line-of-sight analysis requires DEM profile sampling — not yet implemented",
+    }
+
+    parts: list[str] = []
+    if elevation_m is not None:
+        parts.append(f"elevation {elevation_m} m")
+    obs = weather.get("observations", {}).get("observations", {})
+    temp = (obs.get("temperature") or {}).get("latest", {}).get("value")
+    if temp is not None:
+        parts.append(f"temp {temp}°C")
+    wind = (obs.get("wind_speed") or {}).get("latest", {}).get("value")
+    if wind is not None:
+        parts.append(f"wind {wind} m/s")
+    poi_total = sum(nearby.get("poi_counts", {}).values())
+    if poi_total:
+        parts.append(f"{poi_total} nearby POIs")
+    summary = f"Point ({lat:.4f}, {lon:.4f}): {', '.join(parts) if parts else 'no data available'}"
+
+    return {
+        "lat": lat,
+        "lon": lon,
+        "terrain": terrain,
+        "weather": weather,
+        "nearby_context": nearby,
+        "los": los,
+        "summary": summary,
+    }
+
+
+@router.post("/point/inspect", response_model=PointInspectionResponse)
+async def inspect_point(request: PointInspectionRequest, services=Depends(get_services)):
+    try:
+        snapshot = await _build_point_snapshot(request.lat, request.lon, request.timeframe, services)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Point inspection failed: {exc}") from exc
+    return snapshot
 
 
 @router.post("/aoi/inspect", response_model=AoiInspectionResponse)
