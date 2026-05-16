@@ -4,7 +4,7 @@ import math
 import re
 import unicodedata
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -141,7 +141,7 @@ class SatelliteTleAdapter(SourceAdapter):
             },
         )
 
-    def _match_recon_name(self, name: str) -> str | None:
+    def _match_recon_name(self, name: str) -> Optional[str]:
         for known, desc in RECON_NAMES.items():
             if known.lower() in name.lower():
                 return desc

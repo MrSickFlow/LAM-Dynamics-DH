@@ -5,6 +5,7 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -294,7 +295,7 @@ class FmiAdapter(SourceAdapter):
         ascii_area = unicodedata.normalize("NFKD", area).encode("ascii", "ignore").decode("ascii")
         return re.sub(r"\s+", " ", ascii_area).strip().lower()
 
-    def _parse_numeric(self, value: str) -> float | None:
+    def _parse_numeric(self, value: str) -> Optional[float]:
         if value == "":
             return None
         parsed = float(value)

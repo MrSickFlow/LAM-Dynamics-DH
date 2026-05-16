@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import math
 import re
 import unicodedata
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -58,9 +57,27 @@ AREA_POPULATION_CENTERS = {
 }
 
 
+URBAN_RURAL_LABELS = {
+    "SSS": "Total",
+    "KS": "Urban areas",
+    "K1": "Inner urban area",
+    "K2": "Outer urban area",
+    "K3": "Peri-urban area",
+    "MS": "Rural areas",
+    "M4": "Local centres in rural areas",
+    "M5": "Rural areas close to urban areas",
+    "M6": "Rural heartland areas",
+    "M7": "Sparsely populated rural areas",
+    "X": "Unknown",
+}
+
+URBAN_RURAL_CODES = list(URBAN_RURAL_LABELS.keys())
+
+
 class StatisticsFinlandAdapter(SourceAdapter):
     BASE_URL = "https://pxdata.stat.fi/PXWeb/api/v1/en/StatFin"
     TABLE_PATH = "vaerak/statfin_vaerak_pxt_11re.px"
+    URBAN_RURAL_TABLE = "vaerak/statfin_vaerak_pxt_11s3.px"
 
     def _resolve_municipalities(self, area: str) -> list[str]:
         normalized = self._normalize_area(area)
@@ -101,11 +118,14 @@ class StatisticsFinlandAdapter(SourceAdapter):
             resp_age.raise_for_status()
             age_data = resp_age.json()
 
+            urban_rural = await self._fetch_urban_rural(client, municipalities, latest_year)
+
         pop_data = self._extract_population(total_data, municipalities)
         age_dist = self._extract_age_distribution(age_data, all_ages, municipalities)
         pop_data["age_distribution"] = age_dist
         features = self._build_features(area, bbox, pop_data["total"])
         pop_data["population_total"] = pop_data["total"]
+        pop_data["urban_rural"] = urban_rural
 
         municipality_names = [MUNICIPALITY_LABELS.get(m, m) for m in municipalities]
         summary = (
@@ -134,6 +154,45 @@ class StatisticsFinlandAdapter(SourceAdapter):
                 **pop_data,
             },
         )
+
+    async def _fetch_urban_rural(self, client: httpx.AsyncClient, municipalities: list[str], year: str) -> dict:
+        query = {
+            "query": [
+                {"code": "Alue", "selection": {"filter": "item", "values": municipalities}},
+                {"code": "Kaupunki-maaseutu-luokitus", "selection": {"filter": "item", "values": URBAN_RURAL_CODES}},
+                {"code": "Sukupuoli", "selection": {"filter": "item", "values": ["SSS"]}},
+                {"code": "Ikä", "selection": {"filter": "item", "values": ["SSS"]}},
+                {"code": "Vuosi", "selection": {"filter": "item", "values": [year]}},
+                {"code": "Tiedot", "selection": {"filter": "item", "values": ["vaesto"]}},
+            ],
+            "response": {"format": "json-stat2"},
+        }
+        resp = await client.post(f"{self.BASE_URL}/{self.URBAN_RURAL_TABLE}", json=query)
+        resp.raise_for_status()
+        data = resp.json()
+
+        values = data.get("value", [])
+        n_classes = len(URBAN_RURAL_CODES)
+        per_muni: dict[str, dict[str, int]] = {}
+        totals: dict[str, int] = {}
+
+        for m_idx, muni_code in enumerate(municipalities):
+            base = m_idx * n_classes
+            muni_data: dict[str, int] = {}
+            for c_idx, class_code in enumerate(URBAN_RURAL_CODES):
+                idx = base + c_idx
+                pop_val = int(values[idx]) if idx < len(values) and values[idx] is not None else 0
+                muni_data[class_code] = pop_val
+                totals[class_code] = totals.get(class_code, 0) + pop_val
+            per_muni[muni_code] = {
+                "name": MUNICIPALITY_LABELS.get(muni_code, muni_code),
+                "classes": {URBAN_RURAL_LABELS[k]: v for k, v in muni_data.items()},
+            }
+
+        return {
+            "per_municipality": per_muni,
+            "total_by_class": {URBAN_RURAL_LABELS[k]: v for k, v in totals.items()},
+        }
 
     def _extract_population(self, raw: dict[str, Any], municipalities: list[str]) -> dict[str, Any]:
         values = raw.get("value", [])
@@ -186,7 +245,7 @@ class StatisticsFinlandAdapter(SourceAdapter):
                 if pop_val is None:
                     continue
                 age_key = all_ages[a]
-                age_val: int | None = None
+                age_val: Optional[int] = None
                 if age_key == "100-":
                     age_val = 100
                 else:
@@ -245,7 +304,7 @@ class StatisticsFinlandAdapter(SourceAdapter):
                 min_y + height * y0,
             ]]
 
-        weighted_cells: list[dict[str, float | int]] = []
+        weighted_cells: list[dict[str, Any]] = []
         total_weight = 0.0
 
         for row in range(rows):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
-from typing import Any
+from typing import Any, Optional
 
 from shapely import affinity
 from shapely.geometry import mapping, shape
@@ -36,7 +36,7 @@ def geojson_to_shape(geometry: dict[str, Any]) -> BaseGeometry:
     return shape(geometry)
 
 
-def clip_geojson_feature(feature: dict[str, Any], mask: BaseGeometry) -> dict[str, Any] | None:
+def clip_geojson_feature(feature: dict[str, Any], mask: BaseGeometry) -> Optional[dict[str, Any]]:
     geometry = feature.get("geometry")
     if not geometry:
         return None

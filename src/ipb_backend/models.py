@@ -58,7 +58,7 @@ class IngestionResult(BaseModel):
 
 class AoiInspectionRequest(BaseModel):
     geometry: dict[str, Any]
-    timeframe: str | None = None
+    timeframe: Optional[str] = None
 
 
 class AoiInspectionResponse(BaseModel):
@@ -98,3 +98,4 @@ class AgentRunResult(BaseModel):
     timeframe: str
     summary: str
     findings: list[str]
+    data: Optional[dict[str, Any]] = None

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 
+from ipb_backend.agents.bridge_load import BridgeLoadAgent
 from ipb_backend.agents.celltower import CellTowerAgent
+from ipb_backend.agents.demographics import DemographicsAgent
 from ipb_backend.agents.placeholders import SummaryAgent
 from ipb_backend.agents.satellite import SatelliteAgent
 from ipb_backend.analysis import (
@@ -193,7 +195,7 @@ def _is_population_dataset(record: DatasetRecord) -> bool:
     return False
 
 
-def _clip_record_for_aoi(record: DatasetRecord, mask, source_name: str | None = None) -> dict[str, Any]:
+def _clip_record_for_aoi(record: DatasetRecord, mask, source_name: Optional[str] = None) -> dict[str, Any]:
     if record.data.get("collections"):
         payload = _clip_nls_record(record, mask)
     elif record.data.get("station") or record.data.get("observations"):
@@ -446,6 +448,18 @@ async def list_agents():
             purpose="Tracks reconnaissance and imaging satellite overpass schedules for surveillance windows.",
             status="active",
         ),
+        AgentDefinition(
+            agent_id="bridge-load-agent",
+            name="Bridge Load Capacity Agent",
+            purpose="Analyzes bridge/tunnel weight, height, and width limits from Digiroad data for military route viability.",
+            status="active",
+        ),
+        AgentDefinition(
+            agent_id="demographics-agent",
+            name="Demographics Agent",
+            purpose="Analyzes population, age distribution, sex distribution, and urban/rural classification per municipality.",
+            status="active",
+        ),
     ]
 
 
@@ -463,4 +477,14 @@ async def run_agent(agent_id: str, area: str, timeframe: str, services=Depends(g
         if not adapter:
             return {"error": "Satellite adapter not available"}
         return await SatelliteAgent(adapter).run(area=area, timeframe=timeframe)
+    if agent_id == "bridge-load-agent":
+        adapter = services["adapters"].get("digiroad")
+        if not adapter:
+            return {"error": "Digiroad adapter not available"}
+        return await BridgeLoadAgent(adapter).run(area=area, timeframe=timeframe)
+    if agent_id == "demographics-agent":
+        adapter = services["adapters"].get("statistics-finland")
+        if not adapter:
+            return {"error": "Statistics Finland adapter not available"}
+        return await DemographicsAgent(adapter).run(area=area, timeframe=timeframe)
     return {"error": f"Unknown agent: {agent_id}"}

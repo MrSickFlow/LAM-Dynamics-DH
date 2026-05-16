@@ -1,7 +1,12 @@
 from fastapi.testclient import TestClient
 
 from ipb_backend.analysis.analyzers import OllamaAnalyzer
+from ipb_backend.ingestion.sources.digiroad import DigiroadAdapter
 from ipb_backend.ingestion.sources.fmi import FmiAdapter
+from ipb_backend.ingestion.sources.opencellid import OpenCellIdAdapter
+from ipb_backend.ingestion.sources.osm_poi import OsmPoiAdapter
+from ipb_backend.ingestion.sources.satellites import SatelliteTleAdapter
+from ipb_backend.ingestion.sources.statistics_finland import StatisticsFinlandAdapter
 from ipb_backend.main import app
 from ipb_backend.main import state
 from ipb_backend.models import DatasetRecord, SourceCategory
@@ -129,8 +134,21 @@ def test_ui_demo_contains_workspace_shell():
     assert "Raw Data" in response.text
 
 
-def test_ingestion_flow_for_placeholder_sources():
+def test_ingestion_flow_for_placeholder_sources(monkeypatch):
     state["ingestion_service"]._records.clear()
+
+    async def fake_statfin_fetch(self, area, timeframe):
+        return DatasetRecord(
+            source_id="statistics-finland",
+            category=SourceCategory.DEMOGRAPHICS,
+            area="North Karelia",
+            timeframe="72h",
+            summary="Statistics Finland population data for North Karelia",
+            data={"total": 170000, "population_total": 170000, "features": []},
+        )
+
+    monkeypatch.setattr(StatisticsFinlandAdapter, "fetch", fake_statfin_fetch)
+
     ingest_response = client.post(
         "/api/ingest",
         json={
@@ -380,3 +398,360 @@ def test_aoi_inspection_includes_additional_feature_sources():
     assert "custom-infra" in payload["metrics"]["active_sources"]
     assert any(section["source_id"] == "custom-infra" for section in payload["raw_sections"])
     assert any(item["source_id"] == "custom-infra" for item in payload["agent"]["evidence_bundle"])
+
+
+SAMPLE_OPENCELLID_RECORD = DatasetRecord(
+    source_id="opencellid",
+    category=SourceCategory.INFRASTRUCTURE,
+    area="North Karelia",
+    timeframe="72h",
+    summary="OpenCellID: 3 cell towers near North Karelia",
+    data={
+        "provider": "OpenCellID (by Unwired Labs)",
+        "api": "cell/getInArea",
+        "cells": [
+            {"lat": 62.8, "lon": 30.2, "mcc": 244, "mnc": 5, "radio": "LTE", "range": 3000, "samples": 10},
+            {"lat": 62.81, "lon": 30.21, "mcc": 244, "mnc": 5, "radio": "LTE", "range": 2500, "samples": 8},
+            {"lat": 62.79, "lon": 30.19, "mcc": 244, "mnc": 91, "radio": "UMTS", "range": 5000, "samples": 5},
+        ],
+        "total_cells": 3,
+    },
+)
+
+
+def test_opencellid_ingestion(monkeypatch):
+    state["ingestion_service"]._records.clear()
+
+    async def fake_fetch(self, area, timeframe):
+        return SAMPLE_OPENCELLID_RECORD
+
+    monkeypatch.setattr(OpenCellIdAdapter, "fetch", fake_fetch)
+
+    ingest_response = client.post(
+        "/api/ingest",
+        json={"area": "North Karelia", "timeframe": "72h", "source_ids": ["opencellid"]},
+    )
+    assert ingest_response.status_code == 200
+    payload = ingest_response.json()
+    assert payload["requested_sources"] == ["opencellid"]
+    assert len(payload["produced_records"]) == 1
+    assert payload["produced_records"][0]["source_id"] == "opencellid"
+    assert payload["produced_records"][0]["data"]["total_cells"] == 3
+
+
+SAMPLE_OSM_RECORD = DatasetRecord(
+    source_id="osm-poi",
+    category=SourceCategory.OTHER,
+    area="North Karelia",
+    timeframe="72h",
+    summary="OSM POIs for North Karelia: 4 features across 2 categories",
+    data={
+        "provider": "OpenStreetMap contributors (ODbL)",
+        "api": "Overpass API",
+        "categories": {
+            "education": [
+                {"id": "node/1", "type": "node", "lat": 62.8, "lon": 30.2, "tags": {"amenity": "school", "name": "Koulu"}},
+                {"id": "node/2", "type": "node", "lat": 62.81, "lon": 30.21, "tags": {"amenity": "library", "name": "Kirjasto"}},
+            ],
+            "healthcare": [
+                {"id": "node/3", "type": "node", "lat": 62.79, "lon": 30.19, "tags": {"amenity": "hospital", "name": "Sairaala"}},
+                {"id": "node/4", "type": "node", "lat": 62.78, "lon": 30.18, "tags": {"amenity": "pharmacy"}},
+            ],
+        },
+        "total_features": 4,
+    },
+)
+
+
+def test_osm_poi_ingestion(monkeypatch):
+    state["ingestion_service"]._records.clear()
+
+    async def fake_fetch(self, area, timeframe):
+        return SAMPLE_OSM_RECORD
+
+    monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
+
+    ingest_response = client.post(
+        "/api/ingest",
+        json={"area": "North Karelia", "timeframe": "72h", "source_ids": ["osm-poi"]},
+    )
+    assert ingest_response.status_code == 200
+    payload = ingest_response.json()
+    assert payload["requested_sources"] == ["osm-poi"]
+    assert len(payload["produced_records"]) == 1
+    record = payload["produced_records"][0]
+    assert record["source_id"] == "osm-poi"
+    assert record["data"]["total_features"] == 4
+    assert "education" in record["data"]["categories"]
+    assert "healthcare" in record["data"]["categories"]
+
+
+SAMPLE_TLE_RECORD = DatasetRecord(
+    source_id="satellites",
+    category=SourceCategory.SATELLITE,
+    area="North Karelia",
+    timeframe="72h",
+    summary="Satellite TLE data for North Karelia: tracking 3 reconnaissance/imaging satellites",
+    data={
+        "provider": "Celestrak",
+        "satellites": {
+            "Sentinel-1A": {
+                "norad_id": 39634,
+                "type": "SAR imaging (C-band)",
+                "predicted_passes": [
+                    {"pass_time_utc": "2026-05-16T14:00:00", "duration_min": 90.0, "altitude_km": 693},
+                ],
+            },
+            "Sentinel-2A": {
+                "norad_id": 40697,
+                "type": "Multispectral imaging (10m)",
+                "predicted_passes": [
+                    {"pass_time_utc": "2026-05-16T15:00:00", "duration_min": 100.0, "altitude_km": 786},
+                ],
+            },
+            "WorldView-3": {
+                "norad_id": 40115,
+                "type": "Commercial imaging (31cm)",
+                "predicted_passes": [
+                    {"pass_time_utc": "2026-05-16T16:00:00", "duration_min": 95.0, "altitude_km": 617},
+                ],
+            },
+        },
+        "total_tracked": 3,
+    },
+)
+
+
+def test_satellite_ingestion(monkeypatch):
+    state["ingestion_service"]._records.clear()
+
+    async def fake_fetch(self, area, timeframe):
+        return SAMPLE_TLE_RECORD
+
+    monkeypatch.setattr(SatelliteTleAdapter, "fetch", fake_fetch)
+
+    ingest_response = client.post(
+        "/api/ingest",
+        json={"area": "North Karelia", "timeframe": "72h", "source_ids": ["satellites"]},
+    )
+    assert ingest_response.status_code == 200
+    payload = ingest_response.json()
+    assert payload["requested_sources"] == ["satellites"]
+    assert len(payload["produced_records"]) == 1
+    record = payload["produced_records"][0]
+    assert record["source_id"] == "satellites"
+    assert record["data"]["total_tracked"] == 3
+
+
+def test_agents_listing():
+    response = client.get("/api/agents")
+    assert response.status_code == 200
+    agents = response.json()
+    agent_ids = [a["agent_id"] for a in agents]
+    assert "summary-agent" in agent_ids
+    assert "celltower-agent" in agent_ids
+    assert "satellite-agent" in agent_ids
+    assert "bridge-load-agent" in agent_ids
+
+
+def test_celltower_agent_run(monkeypatch):
+    async def fake_fetch(self, area, timeframe):
+        return SAMPLE_OPENCELLID_RECORD
+
+    monkeypatch.setattr(OpenCellIdAdapter, "fetch", fake_fetch)
+
+    response = client.post("/api/agents/celltower-agent/run?area=North+Karelia&timeframe=72h")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["agent_id"] == "celltower-agent"
+    assert result["summary"].startswith("Cell tower analysis")
+    assert any("Total cell towers: 3" in f for f in result["findings"])
+    assert any("244-5" in f for f in result["findings"])
+    assert any("LTE" in f for f in result["findings"])
+    assert any("UMTS" in f for f in result["findings"])
+
+
+def test_satellite_agent_run(monkeypatch):
+    async def fake_fetch(self, area, timeframe):
+        return SAMPLE_TLE_RECORD
+
+    monkeypatch.setattr(SatelliteTleAdapter, "fetch", fake_fetch)
+
+    response = client.post("/api/agents/satellite-agent/run?area=North+Karelia&timeframe=72h")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["agent_id"] == "satellite-agent"
+    assert "3" in result["summary"]
+    assert any("SAR" in f for f in result["findings"])
+    assert any("multispectral" in f or "Multispectral" in f for f in result["findings"])
+
+
+SAMPLE_BRIDGE_COLLECTIONS = {
+    "dr_tielinkki_silta_alikulku_tunneli": {
+        "label": "Bridges, underpasses, tunnels",
+        "number_matched": 5,
+        "number_returned": 3,
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": [[30.0, 62.5], [30.1, 62.5]]},
+                "properties": {"link_id": "bridge-a-1111", "silta_alik": 0},
+            },
+            {
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": [[30.2, 62.6], [30.3, 62.6]]},
+                "properties": {"link_id": "bridge-b-2222", "silta_alik": 0},
+            },
+            {
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": [[30.4, 62.7], [30.5, 62.7]]},
+                "properties": {"link_id": "tunnel-c-3333", "silta_alik": -1},
+            },
+        ],
+    },
+    "dr_max_massa": {
+        "label": "Max weight limit",
+        "features": [
+            {"properties": {"link_id": "bridge-a-1111", "arvo": 60000}},
+            {"properties": {"link_id": "bridge-b-2222", "arvo": 12000}},
+        ],
+    },
+    "dr_max_korkeus": {
+        "label": "Max height limit",
+        "features": [
+            {"properties": {"link_id": "bridge-a-1111", "arvo": 450}},
+            {"properties": {"link_id": "tunnel-c-3333", "arvo": 350}},
+        ],
+    },
+    "dr_max_leveys": {"label": "Max width limit", "features": []},
+    "dr_max_akselimassa": {"label": "Max axle mass", "features": []},
+    "dr_yhdistelman_max_massa": {"label": "Combined max mass", "features": []},
+}
+
+SAMPLE_DIGIROAD_RECORD = DatasetRecord(
+    source_id="digiroad",
+    category=SourceCategory.INFRASTRUCTURE,
+    area="North Karelia",
+    timeframe="72h",
+    summary="Digiroad road data for North Karelia",
+    data={
+        "provider": "Finnish Transport Infrastructure Agency",
+        "collections": SAMPLE_BRIDGE_COLLECTIONS,
+        "total_features": 5,
+    },
+)
+
+
+def test_bridge_load_agent_run(monkeypatch):
+    async def fake_fetch(self, area, timeframe):
+        return SAMPLE_DIGIROAD_RECORD
+
+    monkeypatch.setattr(DigiroadAdapter, "fetch", fake_fetch)
+
+    response = client.post("/api/agents/bridge-load-agent/run?area=North+Karelia&timeframe=72h")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["agent_id"] == "bridge-load-agent"
+    assert result["summary"].startswith("Bridge load capacity analysis")
+    assert "2 bridges" in result["summary"]
+    assert "1 tunnels" in result["summary"]
+    assert any("Main battle tank" in f for f in result["findings"])
+    assert any("Light vehicles" in f for f in result["findings"])
+    assert any("height < 4.0m" in f for f in result["findings"])
+
+    enriched = result["data"]["enriched_features"]
+    assert len(enriched) == 3
+
+    bridge_a = next(e for e in enriched if e["properties"]["link_id"] == "bridge-a-1111")
+    assert bridge_a["properties"]["max_weight_tonnes"] == 60.0
+    assert bridge_a["properties"]["max_height_m"] == 4.5
+    assert bridge_a["properties"]["vehicle_class"] == "Main battle tank"
+
+    bridge_b = next(e for e in enriched if e["properties"]["link_id"] == "bridge-b-2222")
+    assert bridge_b["properties"]["max_weight_tonnes"] == 12.0
+    assert bridge_b["properties"]["vehicle_class"] == "Light vehicles only"
+
+    tunnel_c = next(e for e in enriched if e["properties"]["link_id"] == "tunnel-c-3333")
+    assert tunnel_c["properties"]["type"] == "tunnel"
+    assert tunnel_c["properties"]["max_height_m"] == 3.5
+    assert tunnel_c["properties"]["max_weight_tonnes"] is None
+
+
+def test_bridge_load_agent_empty(monkeypatch):
+    empty_collections = {
+        "dr_tielinkki_silta_alikulku_tunneli": {"label": "Bridges, underpasses, tunnels", "number_matched": 0, "features": []},
+    }
+    empty_record = DatasetRecord(
+        source_id="digiroad",
+        category=SourceCategory.INFRASTRUCTURE,
+        area="North Karelia",
+        timeframe="72h",
+        summary="Digiroad road data",
+        data={"collections": empty_collections, "total_features": 0},
+    )
+
+    async def fake_fetch(self, area, timeframe):
+        return empty_record
+
+    monkeypatch.setattr(DigiroadAdapter, "fetch", fake_fetch)
+
+    response = client.post("/api/agents/bridge-load-agent/run?area=North+Karelia&timeframe=72h")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["agent_id"] == "bridge-load-agent"
+    assert "0 bridges" in result["summary"]
+    assert result["data"]["enriched_features"] == []
+
+
+SAMPLE_DEMOGRAPHICS_RECORD = DatasetRecord(
+    source_id="statistics-finland",
+    category=SourceCategory.DEMOGRAPHICS,
+    area="North Karelia",
+    timeframe="72h",
+    summary="Statistics Finland population data for North Karelia",
+    data={
+        "total": 170000,
+        "male": 85000,
+        "female": 85000,
+        "per_municipality": {},
+        "age_distribution": {"groups": {"0-14": 25000, "15-64": 105000, "65+": 40000}},
+        "urban_rural": {
+            "per_municipality": {
+                "KU167": {
+                    "name": "Joensuu",
+                    "classes": {"Total": 78000, "Urban areas": 66000, "Rural areas": 11000},
+                },
+                "KU176": {
+                    "name": "Juuka",
+                    "classes": {"Total": 4000, "Urban areas": 500, "Rural areas": 3500},
+                },
+            },
+            "total_by_class": {
+                "Total": 82000,
+                "Urban areas": 66500,
+                "Rural areas": 14500,
+                "Inner urban area": 33000,
+                "Outer urban area": 26000,
+            },
+        },
+    },
+)
+
+
+def test_demographics_agent_run(monkeypatch):
+    async def fake_fetch(self, area, timeframe):
+        return SAMPLE_DEMOGRAPHICS_RECORD
+
+    monkeypatch.setattr(StatisticsFinlandAdapter, "fetch", fake_fetch)
+
+    response = client.post("/api/agents/demographics-agent/run?area=North+Karelia&timeframe=72h")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["agent_id"] == "demographics-agent"
+    assert "170,000" in result["summary"] or "170000" in result["summary"]
+    assert "urban" in result["summary"].lower()
+    assert any("Sex distribution" in f for f in result["findings"])
+    assert any("Age distribution" in f for f in result["findings"])
+    assert any("Urban/rural split" in f for f in result["findings"])
+    assert any("Joensuu" in f for f in result["findings"])
+    assert any("Juuka" in f for f in result["findings"])

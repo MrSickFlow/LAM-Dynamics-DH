@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from typing import Optional
 
 from ipb_backend.config import settings
 from ipb_backend.models import IngestionRequest
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 class RefreshScheduler:
     def __init__(self, ingestion_service) -> None:
         self._ingestion_service = ingestion_service
-        self._task: asyncio.Task | None = None
+        self._task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
         if not settings.auto_refresh or self._task is not None:

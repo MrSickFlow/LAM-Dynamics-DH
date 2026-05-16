@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 
 from ipb_backend.config import settings
@@ -35,7 +37,7 @@ class OpenCellIdAdapter(SourceAdapter):
         bbox = f"{center['lat'] - d},{center['lon'] - d},{center['lat'] + d},{center['lon'] + d}"
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            params: dict[str, str | int] = {
+            params: dict[str, Any] = {
                 "key": api_key,
                 "BBOX": bbox,
                 "format": "json",

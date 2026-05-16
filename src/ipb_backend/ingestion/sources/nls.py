@@ -89,7 +89,7 @@ class NationalLandSurveyAdapter(SourceAdapter):
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             async def fetch_collection(coll_id: str) -> tuple[str, dict[str, Any]]:
                 url = f"{self.BASE_URL}/collections/{coll_id}/items"
-                params: dict[str, str | int] = {
+                params: dict[str, Any] = {
                     "bbox": bbox_str,
                     "limit": 100,
                     "api-key": api_key,
