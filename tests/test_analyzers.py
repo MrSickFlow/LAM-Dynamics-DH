@@ -43,6 +43,8 @@ def test_ollama_analyzer_parses_structured_json(monkeypatch):
     assert result["summary"] == "AOI overlaps one transport corridor and sparse population."
     assert result["findings"][0] == "One transport feature intersects the AOI."
     assert result["limitations"] == ["Weather station coverage is absent inside the AOI."]
+    assert result["output"]["profile"] == "general"
+    assert result["output"]["implications"]
 
 
 def test_ollama_analyzer_falls_back_to_plain_text(monkeypatch):
@@ -71,3 +73,4 @@ def test_ollama_analyzer_falls_back_to_plain_text(monkeypatch):
 
     assert result["summary"] == "First grounded finding"
     assert result["findings"] == ["First grounded finding", "Second grounded finding"]
+    assert result["output"]["summary"] == "First grounded finding"

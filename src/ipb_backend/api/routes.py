@@ -19,12 +19,15 @@ from ipb_backend.analysis import (
     RulesAnalyzer,
     build_analyzer,
     build_aoi_metrics,
+    build_data_package,
     build_evidence_bundle,
     build_raw_sections,
     get_analyzer_health,
 )
+from ipb_backend.analysis.contracts import DataPackage
 from ipb_backend.config import settings
 from ipb_backend.ingestion.sources.fmi import FmiAdapter
+from ipb_backend.llm import LlmAnalysisOutput, LlmInterpretRequest, build_llm_wrapper_input, list_profile_specs
 from ipb_backend.models import (
     AoiInspectionRequest,
     AoiInspectionResponse,
@@ -330,6 +333,17 @@ def _clip_record_for_aoi(record: DatasetRecord, mask, source_name: Optional[str]
     payload["category"] = record.category.value
     if source_name:
         payload["title"] = source_name
+    note = str(record.data.get("note", "") or "")
+    fallback_used = "demo" in note.lower() or "fallback" in note.lower() or "demo data" in str(record.data.get("provider", "")).lower()
+    payload["provenance"] = {
+        "provider": str(record.data.get("provider") or source_name or record.source_id),
+        "adapter": type(record).__name__,
+        "retrieved_at": record.retrieved_at,
+        "fallback_used": fallback_used,
+        "fallback_reason": "demo-fallback" if fallback_used else None,
+        "deterministic": True,
+        "note": note or None,
+    }
     return payload
 
 
@@ -342,12 +356,56 @@ def _build_freshness(services, latest_records):
                 "source_id": source.source_id,
                 "name": source.name,
                 "status": source.status,
+                "category": source.category.value,
                 "last_successful_refresh": source.last_successful_refresh,
                 "last_error": source.last_error,
                 "retrieved_at": record.retrieved_at if record else None,
+                "refresh_interval_seconds": source.refresh_interval_seconds,
+                "freshness_label": "fresh" if record is not None and source.last_error is None else "stale",
             }
         )
     return freshness
+
+
+def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], DataPackage]:
+    mask = geojson_to_shape(request.geometry)
+    if mask.is_empty:
+        raise HTTPException(status_code=400, detail="AOI geometry is empty")
+    if mask.geom_type == "MultiPolygon":
+        mask = max(getattr(mask, "geoms", [mask]), key=lambda geom: geom.area)
+    elif mask.geom_type != "Polygon":
+        raise HTTPException(status_code=400, detail="AOI geometry must be a Polygon or MultiPolygon")
+
+    latest_records = _latest_records_by_source(services["ingestion_service"].records)
+    raw_data: dict[str, Any] = {}
+    source_names = {
+        definition.source_id: definition.name
+        for definition in services["registry"].list_sources()
+    }
+
+    for record in latest_records.values():
+        raw_data[record.source_id] = _clip_record_for_aoi(
+            record,
+            mask,
+            source_name=source_names.get(record.source_id),
+        )
+
+    selection = {
+        "geometry": request.geometry,
+        "bounds": list(mask.bounds),
+        "area_sqkm": polygon_area_sqkm(mask),
+    }
+    freshness = _build_freshness(services, latest_records)
+    metrics = build_aoi_metrics(selection["area_sqkm"], raw_data)
+    evidence_bundle = build_evidence_bundle(metrics, raw_data)
+    data_package = build_data_package(
+        selection=selection,
+        timeframe=request.timeframe or "latest",
+        raw_data=raw_data,
+        freshness=freshness,
+        requested_sources=list(latest_records.keys()),
+    )
+    return selection, raw_data, freshness, metrics, evidence_bundle, data_package
 
 
 @router.get("/health")
@@ -617,41 +675,20 @@ async def weather_point(lat: float = Query(...), lon: float = Query(...), timefr
 @router.post("/aoi/inspect", response_model=AoiInspectionResponse)
 async def inspect_aoi(request: AoiInspectionRequest, services=Depends(get_services)):
     try:
-        mask = geojson_to_shape(request.geometry)
+        selection, raw_data, freshness, metrics, evidence_bundle, data_package = _build_aoi_snapshot(request, services)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid AOI geometry: {exc}") from exc
 
-    if mask.is_empty:
-        raise HTTPException(status_code=400, detail="AOI geometry is empty")
-    if mask.geom_type == "MultiPolygon":
-        mask = max(getattr(mask, "geoms", [mask]), key=lambda geom: geom.area)
-    elif mask.geom_type != "Polygon":
-        raise HTTPException(status_code=400, detail="AOI geometry must be a Polygon or MultiPolygon")
-
-    latest_records = _latest_records_by_source(services["ingestion_service"].records)
-    raw_data: dict[str, Any] = {}
-    source_names = {
-        definition.source_id: definition.name
-        for definition in services["registry"].list_sources()
-    }
-
-    for record in latest_records.values():
-        raw_data[record.source_id] = _clip_record_for_aoi(
-            record,
-            mask,
-            source_name=source_names.get(record.source_id),
-        )
-
-    selection = {
-        "geometry": request.geometry,
-        "bounds": list(mask.bounds),
-    }
-    freshness = _build_freshness(services, latest_records)
-    metrics = build_aoi_metrics(polygon_area_sqkm(mask), raw_data)
-    evidence_bundle = build_evidence_bundle(metrics, raw_data)
     analyzer = build_analyzer()
+    llm_input = build_llm_wrapper_input(
+        data_package=data_package,
+        profile=request.profile,
+    )
     try:
         agent = await analyzer.analyze(
+            data_package=data_package.model_dump(mode="json"),
+            llm_input=llm_input.model_dump(mode="json"),
+            profile=request.profile,
             selection=selection,
             metrics=metrics,
             raw_data=raw_data,
@@ -661,6 +698,9 @@ async def inspect_aoi(request: AoiInspectionRequest, services=Depends(get_servic
     except Exception as exc:
         fallback = RulesAnalyzer()
         agent = await fallback.analyze(
+            data_package=data_package.model_dump(mode="json"),
+            llm_input=llm_input.model_dump(mode="json"),
+            profile=request.profile,
             selection=selection,
             metrics=metrics,
             raw_data=raw_data,
@@ -676,8 +716,56 @@ async def inspect_aoi(request: AoiInspectionRequest, services=Depends(get_servic
         raw_data=raw_data,
         raw_sections=build_raw_sections(raw_data),
         freshness=freshness,
+        data_package=data_package,
+        llm_input=llm_input,
+        llm_output=LlmAnalysisOutput.model_validate(agent.get("output", {})),
         agent=agent,
     )
+
+
+@router.post("/aoi/data-package", response_model=DataPackage)
+async def aoi_data_package(request: AoiInspectionRequest, services=Depends(get_services)):
+    try:
+        _, _, _, _, _, data_package = _build_aoi_snapshot(request, services)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid AOI geometry: {exc}") from exc
+    return data_package
+
+
+@router.post("/aoi/interpret", response_model=LlmAnalysisOutput)
+async def aoi_interpret(request: LlmInterpretRequest):
+    analyzer = build_analyzer()
+    llm_input = build_llm_wrapper_input(
+        data_package=request.data_package,
+        profile=request.profile,
+        question=request.question,
+        conversation_history=request.conversation_history,
+    )
+    try:
+        result = await analyzer.analyze(
+            data_package=request.data_package.model_dump(mode="json"),
+            llm_input=llm_input.model_dump(mode="json"),
+            profile=request.profile,
+            question=request.question,
+            conversation_history=[item.model_dump(mode="json") for item in request.conversation_history],
+        )
+    except Exception as exc:
+        fallback = RulesAnalyzer()
+        result = await fallback.analyze(
+            data_package=request.data_package.model_dump(mode="json"),
+            llm_input=llm_input.model_dump(mode="json"),
+            profile=request.profile,
+            question=request.question,
+            conversation_history=[item.model_dump(mode="json") for item in request.conversation_history],
+        )
+        result["status"] = "fallback"
+        result["error"] = str(exc)
+    return LlmAnalysisOutput.model_validate(result.get("output", {}))
+
+
+@router.get("/analysis/profiles")
+async def analysis_profiles():
+    return list_profile_specs()
 
 
 @router.get("/ui-demo", response_class=HTMLResponse)

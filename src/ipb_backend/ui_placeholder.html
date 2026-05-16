@@ -24,6 +24,7 @@
 
     body {
       margin: 0;
+      display: flex;
       height: 100vh;
       overflow: hidden;
       font-family: "Segoe UI", -apple-system, sans-serif;
@@ -38,8 +39,10 @@
 
     .workspace {
       display: flex;
+      flex: 1;
       height: 100vh;
       min-height: 0;
+      min-width: 0;
     }
 
     .map-panel {
@@ -331,7 +334,7 @@
     }
 
     .inspector {
-      flex: 0 0 430px;
+      flex: 0 0 520px;
       height: 100vh;
       min-width: 0;
       overflow-y: auto;
@@ -463,6 +466,144 @@
       margin: 0;
       font-size: 0.96rem;
       line-height: 1.5;
+    }
+
+    .conversation-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .conversation-toolbar label {
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .profile-select {
+      min-width: 180px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--ink);
+      font-size: 0.84rem;
+    }
+
+    .conversation-context {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .chat-thread {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 320px;
+      max-height: 420px;
+      overflow-y: auto;
+      padding-right: 4px;
+      margin-top: 12px;
+    }
+
+    .chat-thread::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    .chat-thread::-webkit-scrollbar-thumb {
+      background: var(--line);
+      border-radius: 999px;
+    }
+
+    .chat-message {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .chat-message.is-user {
+      align-items: flex-end;
+    }
+
+    .chat-role {
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .chat-bubble {
+      width: 100%;
+      max-width: 92%;
+      padding: 12px 14px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 8px 20px rgba(20, 38, 29, 0.06);
+    }
+
+    .chat-message.is-user .chat-bubble {
+      background: rgba(33, 83, 71, 0.12);
+      border-color: rgba(33, 83, 71, 0.12);
+    }
+
+    .chat-message-copy {
+      margin: 0;
+      font-size: 0.92rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+
+    .chat-block {
+      margin-top: 12px;
+    }
+
+    .chat-block-title {
+      margin: 0 0 8px;
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .chat-composer {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .chat-input {
+      min-height: 84px;
+      resize: vertical;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--ink);
+      font: inherit;
+      line-height: 1.45;
+    }
+
+    .chat-send {
+      align-self: end;
+      min-width: 108px;
+      min-height: 48px;
+    }
+
+    .conversation-note {
+      margin-top: 10px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.45;
     }
 
     .agent-meta,
@@ -763,7 +904,7 @@
       <div class="section">
         <div class="section-body">
           <h1 class="headline">AOI Inspector</h1>
-          <p class="subhead">Raw source data, source freshness, and a grounded agent interpretation all track the polygon you draw on the map.</p>
+          <p class="subhead">Raw source data, source freshness, grounded agent interpretation, and follow-up conversation all track the AOI you draw on the map.</p>
         </div>
       </div>
 
@@ -784,6 +925,11 @@
           <span class="collapse-icon">▾</span>
         </button>
         <div class="section-body">
+          <p class="agent-summary" id="agent-summary">Awaiting an AOI. The grounded agent summary will cite the intersecting evidence bundle here.</p>
+          <div class="agent-meta" id="agent-meta"></div>
+          <div class="conversation-toolbar">
+            <div class="bullet-group-label">Weather</div>
+          </div>
           <div class="weather-grid" id="weather-grid">
             <div class="weather-metric"><div class="val" id="w-temp">--</div><div class="lbl">Temp</div></div>
             <div class="weather-metric"><div class="val" id="w-wind">--</div><div class="lbl">Wind</div></div>
@@ -793,11 +939,31 @@
             <div class="weather-metric"><div class="val" id="w-cloud">--</div><div class="lbl">Cloud</div></div>
           </div>
           <div class="weather-station" id="w-station">No weather data loaded</div>
-          <p class="agent-summary" id="agent-summary">Awaiting an AOI. The grounded agent summary will cite the intersecting evidence bundle here.</p>
-          <div class="agent-meta" id="agent-meta"></div>
+          <div class="bullet-group-label">Findings</div>
           <div class="bullet-list" id="agent-findings"></div>
           <div class="agent-limitations" id="agent-limitations"></div>
+          <div class="bullet-group-label">Evidence</div>
           <div class="bullet-list" id="agent-evidence"></div>
+        </div>
+      </div>
+
+      <div class="section is-collapsible" data-section>
+        <button class="section-toggle" type="button" aria-expanded="true">
+          <div class="section-header">Conversation Window</div>
+          <span class="collapse-icon">▾</span>
+        </button>
+        <div class="section-body">
+          <div class="conversation-toolbar">
+            <label for="analysis-profile">Analysis Profile</label>
+            <select id="analysis-profile" class="profile-select"></select>
+          </div>
+          <div class="conversation-context" id="conversation-context"></div>
+          <div class="chat-thread" id="chat-thread"></div>
+          <div class="chat-composer">
+            <textarea id="chat-input" class="chat-input" placeholder="Ask about mobility, concealment, surveillance, infrastructure resilience, logistics, or communications using only the AOI evidence package." disabled></textarea>
+            <button class="btn btn-primary chat-send" id="chat-send-btn" type="button" disabled>Send</button>
+          </div>
+          <div class="conversation-note">The conversation agent only receives normalized source digests, derived indicators, evidence ids, and quality guardrails. Raw extraction stays deterministic.</div>
         </div>
       </div>
 
@@ -823,7 +989,7 @@
         </div>
       </div>
 
-      <div class="section raw-section is-collapsible" data-section>
+      <div class="section is-collapsible" data-section>
         <button class="section-toggle" type="button" aria-expanded="true">
           <div class="section-header">Raw Data</div>
           <span class="collapse-icon">▾</span>
@@ -857,6 +1023,9 @@
       selectionGeometry: null,
       latestInspection: null,
       analysisHealth: null,
+      analysisProfiles: [],
+      chatMessages: [],
+      chatPending: false,
       dataCache: {},
       loadSelection: {
         enabled: false,
@@ -882,6 +1051,8 @@
     const clearSelectionBtn = document.getElementById("clear-selection-btn");
     const overlayControls = document.getElementById("overlay-controls");
     const selectionLabel = document.getElementById("selection-label");
+    const analysisProfile = document.getElementById("analysis-profile");
+    const conversationContext = document.getElementById("conversation-context");
     const metricsGrid = document.getElementById("metrics-grid");
     const selectionMeta = document.getElementById("selection-meta");
     const agentSummary = document.getElementById("agent-summary");
@@ -889,6 +1060,9 @@
     const agentFindings = document.getElementById("agent-findings");
     const agentLimitations = document.getElementById("agent-limitations");
     const agentEvidence = document.getElementById("agent-evidence");
+    const chatThread = document.getElementById("chat-thread");
+    const chatInput = document.getElementById("chat-input");
+    const chatSendBtn = document.getElementById("chat-send-btn");
     const freshnessList = document.getElementById("freshness-list");
     const rawData = document.getElementById("raw-data");
     const statusLine = document.getElementById("status-line");
@@ -1800,6 +1974,223 @@
       });
     }
 
+    function fallbackProfiles() {
+      return [
+        { profile: "general", label: "General", focus: "Balanced operational summary across available evidence." },
+        { profile: "mobility", label: "Mobility", focus: "Movement corridors, route constraints, and off-road access." },
+        { profile: "concealment", label: "Concealment", focus: "Cover, concealment, and exposure constraints." },
+        { profile: "surveillance", label: "Surveillance / Observation", focus: "Observation opportunities, gaps, and monitoring constraints." },
+        { profile: "infrastructure_resilience", label: "Infrastructure Resilience", focus: "Dependency concentration, redundancy, and disruption sensitivity." },
+        { profile: "logistics", label: "Logistics", focus: "Access, sustainment, and support-node implications." },
+        { profile: "communications", label: "Communications", focus: "Cell coverage, communications nodes, and likely connectivity gaps." },
+      ];
+    }
+
+    function renderProfileOptions() {
+      const profiles = state.analysisProfiles.length ? state.analysisProfiles : fallbackProfiles();
+      const selected = analysisProfile.value || "general";
+      analysisProfile.innerHTML = "";
+      profiles.forEach((item) => {
+        const option = document.createElement("option");
+        option.value = item.profile;
+        option.textContent = item.label;
+        option.title = item.focus;
+        if (item.profile === selected) option.selected = true;
+        analysisProfile.appendChild(option);
+      });
+    }
+
+    async function ensureAnalysisProfilesLoaded() {
+      if (state.analysisProfiles.length) {
+        renderProfileOptions();
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/analysis/profiles");
+        state.analysisProfiles = response.ok ? await response.json() : fallbackProfiles();
+      } catch (error) {
+        console.error("Profile load failed:", error);
+        state.analysisProfiles = fallbackProfiles();
+      }
+
+      renderProfileOptions();
+    }
+
+    function setChatComposerState(enabled) {
+      chatInput.disabled = !enabled || state.chatPending;
+      chatSendBtn.disabled = !enabled || state.chatPending;
+      chatSendBtn.textContent = state.chatPending ? "Thinking..." : "Send";
+    }
+
+    function renderConversationContext(payload) {
+      conversationContext.innerHTML = "";
+      if (!payload) {
+        return;
+      }
+
+      const health = state.analysisHealth;
+      const chips = [
+        { label: `Profile: ${analysisProfile.value || payload.llm_output?.profile || "general"}` },
+        { label: `${payload.llm_input?.source_digests?.length || 0} sources` },
+        { label: `${payload.llm_input?.evidence_catalog?.length || 0} evidence items` },
+        { label: `Confidence: ${payload.llm_input?.guardrails?.overall_confidence || payload.data_package?.quality?.overall_confidence || "medium"}` },
+      ];
+
+      if (health?.provider) chips.push({ label: `Provider: ${health.provider}` });
+      if (health?.model) chips.push({ label: `Model: ${health.model}` });
+      if (health?.status) chips.push({ label: `Status: ${health.status}`, tone: chipToneForStatus(health.status) });
+      if (payload.llm_input?.guardrails?.fallback_sources?.length) {
+        chips.push({ label: `Fallback: ${payload.llm_input.guardrails.fallback_sources.join(", ")}`, tone: "is-warning" });
+      }
+
+      chips.forEach((chip) => {
+        const item = document.createElement("div");
+        item.className = `agent-chip ${chip.tone || ""}`.trim();
+        item.textContent = chip.label;
+        conversationContext.appendChild(item);
+      });
+    }
+
+    function buildChatList(title, items, formatter) {
+      if (!items || !items.length) return null;
+      const block = document.createElement("div");
+      block.className = "chat-block";
+
+      const heading = document.createElement("div");
+      heading.className = "chat-block-title";
+      heading.textContent = title;
+      block.appendChild(heading);
+
+      const list = document.createElement("div");
+      list.className = "bullet-list";
+      items.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "bullet-item";
+        row.textContent = formatter(item);
+        list.appendChild(row);
+      });
+      block.appendChild(list);
+      return block;
+    }
+
+    function renderConversation() {
+      chatThread.innerHTML = "";
+      if (!state.chatMessages.length) {
+        chatThread.innerHTML = '<div class="empty-state">Inspect an AOI first, then ask evidence-grounded follow-up questions here.</div>';
+        return;
+      }
+
+      state.chatMessages.forEach((message) => {
+        const article = document.createElement("article");
+        article.className = `chat-message is-${message.role === "user" ? "user" : "assistant"}`;
+
+        const role = document.createElement("div");
+        role.className = "chat-role";
+        role.textContent = message.role === "user" ? "User" : "LLM Agent";
+        article.appendChild(role);
+
+        const bubble = document.createElement("div");
+        bubble.className = "chat-bubble";
+        const copy = document.createElement("p");
+        copy.className = "chat-message-copy";
+        copy.textContent = message.content;
+        bubble.appendChild(copy);
+
+        if (message.output) {
+          const implications = buildChatList("Implications", message.output.implications || [], (item) => item.statement);
+          const relevance = buildChatList("Defensive Relevance", message.output.defensive_relevance || [], (item) => item.statement);
+          const limitations = buildChatList("Limitations", message.output.limitations || [], (item) => item.statement);
+          const uncertainties = buildChatList("Uncertainties", message.output.uncertainties || [], (item) => item.statement);
+          [implications, relevance, limitations, uncertainties].filter(Boolean).forEach((block) => bubble.appendChild(block));
+        }
+
+        article.appendChild(bubble);
+        chatThread.appendChild(article);
+      });
+
+      chatThread.scrollTop = chatThread.scrollHeight;
+    }
+
+    function renderConversationEmpty(message) {
+      state.chatMessages = [];
+      renderConversationContext(null);
+      renderConversation();
+      setChatComposerState(false);
+    }
+
+    function setConversationFromInspection(payload) {
+      renderConversationContext(payload);
+      state.chatMessages = [
+        {
+          role: "assistant",
+          content: payload.llm_output?.summary || payload.agent?.summary || "No grounded summary available.",
+          output: payload.llm_output || null,
+        },
+      ];
+      renderConversation();
+      setChatComposerState(true);
+    }
+
+    async function sendConversationQuestion() {
+      if (!state.latestInspection || state.chatPending) {
+        return;
+      }
+
+      const question = chatInput.value.trim();
+      if (!question) {
+        return;
+      }
+
+      state.chatMessages.push({ role: "user", content: question });
+      chatInput.value = "";
+      renderConversation();
+
+      state.chatPending = true;
+      setChatComposerState(true);
+      statusLine.textContent = "Generating grounded response from the normalized evidence package...";
+
+      try {
+        const response = await fetch("/api/aoi/interpret", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            data_package: state.latestInspection.data_package,
+            profile: analysisProfile.value || "general",
+            question,
+            conversation_history: state.chatMessages.slice(-6).map((message) => ({
+              role: message.role,
+              content: message.content,
+            })),
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Conversation request failed with ${response.status}`);
+        }
+
+        const output = await response.json();
+        state.chatMessages.push({
+          role: "assistant",
+          content: output.summary || "No grounded response available.",
+          output,
+        });
+        renderConversation();
+        statusLine.textContent = "Conversation updated from normalized AOI evidence.";
+      } catch (error) {
+        console.error(error);
+        state.chatMessages.push({
+          role: "assistant",
+          content: "The conversation request failed. The deterministic AOI evidence is still available below.",
+        });
+        renderConversation();
+        statusLine.textContent = "Conversation request failed.";
+      } finally {
+        state.chatPending = false;
+        setChatComposerState(!!state.latestInspection);
+      }
+    }
+
     function renderRawData(rawSections, rawPayload) {
       rawData.innerHTML = "";
       const sections = rawSections?.length ? rawSections : buildLegacyRawSections(rawPayload);
@@ -1953,6 +2344,8 @@
       renderMetrics(null);
       selectionMeta.textContent = message || "Draw an AOI to inspect intersecting source data.";
       renderAgent(null);
+      renderConversationEmpty(message);
+      renderFreshness(state.sources);
       renderRawData(null, null);
     }
 
@@ -1962,6 +2355,7 @@
       selectionMeta.textContent = `Bounds: ${payload.selection.bounds.map((value) => value.toFixed(3)).join(", ")}`;
       renderMetrics(payload.metrics);
       renderAgent(payload.agent);
+      setConversationFromInspection(payload);
       renderFreshness(payload.freshness);
       renderRawData(payload.raw_sections, payload.raw_data);
     }
@@ -1972,7 +2366,7 @@
         const response = await fetch("/api/aoi/inspect", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ geometry, timeframe: state.timeframe }),
+          body: JSON.stringify({ geometry, timeframe: state.timeframe, profile: analysisProfile.value || "general" }),
         });
         if (!response.ok) {
           throw new Error(`AOI inspection failed with ${response.status}`);
@@ -1989,6 +2383,7 @@
 
     async function bootstrapWorkspace() {
       if (!state.map) initMap();
+      await ensureAnalysisProfilesLoaded();
       state.workspaceArea = state.loadTarget?.label || state.bootstrapArea;
       state.pointWeatherData = null;
       state.weatherPickerActive = false;
@@ -2266,6 +2661,23 @@
         return;
       }
       beginLoadRectangleMode();
+    });
+
+    analysisProfile.addEventListener("change", async () => {
+      if (!state.selectionGeometry) {
+        renderConversationContext(state.latestInspection);
+        return;
+      }
+      statusLine.textContent = "Refreshing conversation for the selected profile...";
+      await inspectSelection(state.selectionGeometry);
+    });
+
+    chatSendBtn.addEventListener("click", sendConversationQuestion);
+    chatInput.addEventListener("keydown", async (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        await sendConversationQuestion();
+      }
     });
 
     refreshBtn.addEventListener("click", bootstrapWorkspace);

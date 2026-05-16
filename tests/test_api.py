@@ -172,6 +172,8 @@ def test_ui_demo_contains_workspace_shell():
     assert "Map Overlays" in response.text
     assert "AOI Metrics" in response.text
     assert "Agent Interpreter" in response.text
+    assert "Conversation Window" in response.text
+    assert "Analysis Profile" in response.text
     assert "Raw Data" in response.text
 
 
@@ -448,6 +450,12 @@ def test_aoi_inspection_returns_clipped_source_data():
     assert payload["raw_sections"][0]["subsections"]
     assert payload["agent"]["provider"] == "rules"
     assert payload["agent"]["evidence_bundle"]
+    assert payload["data_package"]["selection"]["selection_type"] == "geometry"
+    assert payload["llm_input"]["profile_focus"]
+    assert payload["llm_input"]["source_digests"]
+    assert payload["data_package"]["quality"]["overall_confidence"] in {"high", "low", "medium"}
+    assert payload["llm_output"]["profile"] == "general"
+    assert payload["llm_output"]["implications"]
 
 
 def test_aoi_inspection_includes_additional_feature_sources():
@@ -503,6 +511,7 @@ def test_aoi_inspection_includes_additional_feature_sources():
     assert "custom-infra" in payload["metrics"]["active_sources"]
     assert any(section["source_id"] == "custom-infra" for section in payload["raw_sections"])
     assert any(item["source_id"] == "custom-infra" for item in payload["agent"]["evidence_bundle"])
+    assert any(item["source_id"] == "custom-infra" for item in payload["data_package"]["source_summaries"])
 
 SAMPLE_OPENCELLID_RECORD = DatasetRecord(
     source_id="opencellid",
@@ -1134,3 +1143,151 @@ def test_aoi_inspection_includes_osm_and_cell_sources():
     assert payload["metrics"]["geometry_counts"]["Point"] == 2
     assert any(section["source_id"] == "osm-poi" for section in payload["raw_sections"])
     assert any(section["source_id"] == "opencellid" for section in payload["raw_sections"])
+
+
+def test_aoi_data_package_endpoint_returns_normalized_contract():
+    state["ingestion_service"]._records.clear()
+    state["ingestion_service"]._records.extend(
+        [
+            DatasetRecord(
+                source_id="custom-infra",
+                category=SourceCategory.INFRASTRUCTURE,
+                area="North Karelia",
+                timeframe="72h",
+                summary="Custom infrastructure record",
+                data={
+                    "provider": "Custom Infrastructure Feed",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [30.35, 62.62],
+                            },
+                            "properties": {"name": "Tower site"},
+                        }
+                    ],
+                },
+            )
+        ]
+    )
+
+    response = client.post(
+        "/api/aoi/data-package",
+        json={
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[30.0, 62.4], [30.6, 62.4], [30.6, 62.85], [30.0, 62.85], [30.0, 62.4]]],
+            },
+            "timeframe": "72h",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "1.0"
+    assert payload["selection"]["selection_type"] == "geometry"
+    assert payload["counts"]["by_source"]["custom-infra"] == 1
+    assert payload["source_summaries"][0]["provenance"]["deterministic"] is True
+    assert payload["evidence_items"]
+
+
+def test_analysis_profiles_endpoint_lists_wrapper_profiles():
+    response = client.get("/api/analysis/profiles")
+
+    assert response.status_code == 200
+    payload = response.json()
+    profiles = {item["profile"] for item in payload}
+    assert "general" in profiles
+    assert "mobility" in profiles
+    assert "communications" in profiles
+
+
+def test_aoi_interpret_accepts_question_and_history():
+    response = client.post(
+        "/api/aoi/interpret",
+        json={
+            "profile": "mobility",
+            "question": "What matters most for movement?",
+            "conversation_history": [
+                {"role": "user", "content": "Give me a movement-focused read."}
+            ],
+            "data_package": {
+                "schema_version": "1.0",
+                "package_id": "pkg-1",
+                "generated_at": "2026-05-16T12:00:00Z",
+                "selection": {
+                    "selection_type": "geometry",
+                    "area_id": None,
+                    "label": None,
+                    "geometry": {"type": "Polygon", "coordinates": []},
+                    "bounds_wgs84": [30.0, 62.4, 30.6, 62.85],
+                    "area_sqkm": 10.0,
+                },
+                "scope": {
+                    "timeframe": "72h",
+                    "requested_sources": ["digiroad"],
+                    "resolved_sources": ["digiroad"],
+                },
+                "source_freshness": [],
+                "source_summaries": [
+                    {
+                        "source_id": "digiroad",
+                        "category": "infrastructure",
+                        "title": "Digiroad",
+                        "summary": "1 transport feature intersects the AOI",
+                        "raw_summary": {"feature_count": 1},
+                        "confidence": "high",
+                        "provenance": {
+                            "provider": "Digiroad",
+                            "adapter": "DatasetRecord",
+                            "retrieved_at": None,
+                            "fallback_used": False,
+                            "fallback_reason": None,
+                            "deterministic": True,
+                            "note": None,
+                        },
+                    }
+                ],
+                "counts": {
+                    "by_source": {"digiroad": 1},
+                    "by_category": {"infrastructure": 1},
+                    "geometry_types": {"LineString": 1},
+                },
+                "derived_indicators": [
+                    {
+                        "indicator_id": "selection_area_sqkm",
+                        "name": "Selection Area",
+                        "value": 10.0,
+                        "unit": "sqkm",
+                        "method": "polygon_area",
+                        "source_ids": [],
+                        "confidence": "high",
+                        "notes": [],
+                    }
+                ],
+                "evidence_items": [
+                    {
+                        "evidence_id": "ev-digiroad-001",
+                        "source_id": "digiroad",
+                        "kind": "count-summary",
+                        "title": "digiroad evidence 1",
+                        "detail": "1 intersecting feature",
+                        "support": "Transport link",
+                        "data_ref": {"section": "source_summaries", "path": "source_summaries[0].raw_summary"},
+                    }
+                ],
+                "quality": {
+                    "fallback_sources": [],
+                    "error_sources": [],
+                    "coverage_gaps": [],
+                    "overall_confidence": "high",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["profile"] == "mobility"
+    assert payload["summary"].startswith("Question received:")

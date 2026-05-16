@@ -6,6 +6,9 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from ipb_backend.analysis.contracts import DataPackage
+from ipb_backend.llm.contracts import AnalysisProfile, LlmAnalysisOutput, LlmInterpretRequest, LlmWrapperInput
+
 
 class SourceCategory(str, Enum):
     TERRAIN = "terrain"
@@ -74,6 +77,7 @@ class IngestionResult(BaseModel):
 class AoiInspectionRequest(BaseModel):
     geometry: dict[str, Any]
     timeframe: Optional[str] = None
+    profile: AnalysisProfile = AnalysisProfile.GENERAL
 
 
 class AoiInspectionResponse(BaseModel):
@@ -82,6 +86,9 @@ class AoiInspectionResponse(BaseModel):
     raw_data: dict[str, Any]
     raw_sections: list[dict[str, Any]]
     freshness: list[dict[str, Any]]
+    data_package: DataPackage
+    llm_input: LlmWrapperInput
+    llm_output: LlmAnalysisOutput
     agent: dict[str, Any]
 
 
