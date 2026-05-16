@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 
 from ipb_backend.agents.bridge_load import BridgeLoadAgent
@@ -447,10 +447,17 @@ async def list_sources(services=Depends(get_services)):
     return services["registry"].list_sources()
 
 
-@router.post("/ingest")
-async def ingest(request: IngestionRequest, services=Depends(get_services)):
+@router.post("/ingest", status_code=202)
+async def ingest(request: IngestionRequest, background_tasks: BackgroundTasks, services=Depends(get_services)):
     try:
-        return await services["ingestion_service"].ingest(request)
+        source_ids = request.source_ids or services["registry"].enabled_source_ids()
+        missing = services["registry"].missing_source_ids(source_ids)
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Unknown source ids: {', '.join(sorted(missing))}")
+        background_tasks.add_task(services["ingestion_service"].ingest, request)
+        return {"status": "started", "source_ids": source_ids}
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

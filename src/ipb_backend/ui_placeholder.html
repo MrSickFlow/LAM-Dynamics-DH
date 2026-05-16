@@ -3105,6 +3105,22 @@
         if (!ingestResponse.ok) {
           throw new Error(`Workspace ingest failed with ${ingestResponse.status}`);
         }
+        // Ingest returns 202 immediately and runs in the background.
+        // Poll /api/sources every 2s until all enabled sources leave "idle" state (max 60s).
+        const enabledIds = new Set((await ingestResponse.json()).source_ids || []);
+        const deadline = Date.now() + 60_000;
+        while (Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, 2000));
+          const pollResp = await fetch("/api/sources");
+          if (!pollResp.ok) break;
+          const sources = await pollResp.json();
+          const allDone = sources
+            .filter(s => enabledIds.has(s.source_id))
+            .every(s => s.status !== "idle" && s.status !== "running");
+          if (allDone) break;
+          const ready = sources.filter(s => enabledIds.has(s.source_id) && s.status === "ready").length;
+          statusLine.innerHTML = `<span class="status-spinner"></span>Loading sources… ${ready}/${enabledIds.size} ready`;
+        }
       } catch (error) {
         console.error("Ingest failed:", error);
         statusLine.classList.remove("is-loading");
