@@ -100,6 +100,14 @@ def test_health_endpoint():
     assert response.json() == {"status": "ok"}
 
 
+def test_ui_demo_contains_workspace_shell():
+    response = client.get("/api/ui-demo")
+    assert response.status_code == 200
+    assert "Map-first home screen with modular windows." in response.text
+    assert "Right-side dashboard" in response.text
+    assert "Weather information" in response.text
+
+
 def test_ingestion_flow_for_placeholder_sources():
     state["ingestion_service"]._records.clear()
     ingest_response = client.post(
