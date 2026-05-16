@@ -16,12 +16,12 @@ def _overpass_bbox(bbox: tuple[float, float, float, float]) -> str:
     return f"{south},{west},{north},{east}"
 
 
-# Four sequential batches — each has its own result cap so categories don't compete.
-# transport alone exceeds 2500 for large Finnish regions; power_infrastructure tops 3000.
-# Keep each high-volume category isolated so smaller categories aren't starved.
-BATCHES: list[dict[str, str]] = [
-    # Batch 1 — civilian services (low volume, all fit comfortably)
-    {
+# Each batch is {"geom": bool, "queries": {category: overpass_fragment}}.
+# geom=True uses "out geom" to return full coordinates for lines/polygons.
+# geom=False uses "out center" which is faster and only returns a centroid for ways.
+BATCHES: list[dict[str, Any]] = [
+    # Batch 1 — civilian services (point features only)
+    {"geom": False, "queries": {
         "education":        ('node["amenity"~"school|university|college|kindergarten|childcare|library"]({b});'
                              'way["amenity"~"school|university|college|kindergarten|childcare|library"]({b});'),
         "healthcare":       ('node["amenity"~"hospital|clinic|doctors|dentist|pharmacy|veterinary"]({b});'
@@ -32,22 +32,16 @@ BATCHES: list[dict[str, str]] = [
                                'way["amenity"~"police|fire_station|ambulance_station"]({b});'),
         "government":       ('node["amenity"~"townhall|courthouse|prison|embassy|community_centre"]({b});'
                              'way["amenity"~"townhall|courthouse|prison|embassy|community_centre"]({b});'),
-    },
-    # Batch 2 — water sources
-    {
+    }},
+    # Batch 2 — water sources (point features only)
+    {"geom": False, "queries": {
         "water_sources":    ('node["amenity"="drinking_water"]({b});'
                              'node["man_made"~"water_tower|water_well|water_works"]({b});'
                              'node["natural"="spring"]({b});'
                              'way["man_made"~"water_tower|water_well|water_works"]({b});'),
-    },
-    # Batch 3 — power infrastructure isolated (towers alone hit 3000 for large regions)
-    {
-        "power_infrastructure": ('node["power"~"tower|pole|substation|plant|generator"]({b});'
-                                 'way["power"~"line|minor_line|cable"]({b});'
-                                 'way["power"="substation"]({b});'),
-    },
-    # Batch 4 — operational / military + area features
-    {
+    }},
+    # Batch 3 — operational / military (point features only)
+    {"geom": False, "queries": {
         "military":         ('node["military"]({b});'
                              'way["military"]({b});'
                              'node["landuse"="military"]({b});'
@@ -61,13 +55,28 @@ BATCHES: list[dict[str, str]] = [
                              'way["landuse"~"industrial|commercial|retail"]({b});'
                              'node["building"~"industrial|warehouse|factory"]({b});'
                              'way["building"~"industrial|warehouse|factory"]({b});'),
-    },
+    }},
+    # Batch 4 — power infrastructure as lines + key point assets (substations/plants).
+    # Towers/poles are omitted: 3000+ individual points add noise; the line geometry
+    # already shows the network routing.
+    {"geom": True, "queries": {
+        "power_infrastructure": ('node["power"~"substation|plant|generator"]({b});'
+                                 'way["power"~"line|minor_line|cable"]({b});'
+                                 'way["power"="substation"]({b});'),
+    }},
+    # Batch 5 — forest as filled polygons (ways only; relations skipped to limit payload).
+    # Coloured by leaf_type: needleleaved (dark) vs broadleaved (medium).
+    {"geom": True, "queries": {
+        "forest":           ('way["natural"="wood"]({b});'
+                             'way["landuse"="forest"]({b});'),
+    }},
 ]
 
 
-def _build_query(batch: dict[str, str], b: str, limit: int = 3000) -> str:
-    union = "".join(q.format(b=b) for q in batch.values())
-    return f"[out:json][timeout:55];({union});out center {limit};"
+def _build_query(batch: dict[str, Any], b: str, limit: int = 3000) -> str:
+    union = "".join(q.format(b=b) for q in batch["queries"].values())
+    out_mode = "geom" if batch.get("geom") else "center"
+    return f"[out:json][timeout:55];({union});out {out_mode} {limit};"
 
 
 def _classify(tags: dict[str, str]) -> str:
@@ -103,17 +112,20 @@ def _classify(tags: dict[str, str]) -> str:
         return "power_infrastructure"
     if landuse in {"industrial", "commercial", "retail"} or building in {"industrial", "warehouse", "factory"}:
         return "industry"
+    if natural == "wood" or landuse == "forest":
+        return "forest"
     return "other"
 
 
 ALLOWED_TAGS: dict[str, set[str]] = {
-    "military": {"military", "name", "landuse", "access", "description"},
-    "airfields": {"aeroway", "name", "icao", "iata", "operator", "surface", "length", "width"},
-    "industry": {"landuse", "building", "name", "operator", "industrial"},
-    "fuel_supply": {"amenity", "name", "brand", "opening_hours", "operator"},
+    "forest":               {"leaf_type", "leaf_cycle", "natural", "landuse", "name", "wood"},
+    "military":             {"military", "name", "landuse", "access", "description"},
+    "airfields":            {"aeroway", "name", "icao", "iata", "operator", "surface", "length", "width"},
+    "industry":             {"landuse", "building", "name", "operator", "industrial"},
+    "fuel_supply":          {"amenity", "name", "brand", "opening_hours", "operator"},
     "power_infrastructure": {"power", "voltage", "name", "operator", "cables", "circuits"},
-    "_default": {"amenity", "name", "religion", "denomination", "school", "healthcare",
-                 "operator", "capacity", "drinking_water", "shop", "highway", "natural"},
+    "_default":             {"amenity", "name", "religion", "denomination", "school", "healthcare",
+                             "operator", "capacity", "drinking_water", "shop", "natural"},
 }
 
 
@@ -122,15 +134,39 @@ def _filter_tags(tags: dict[str, str], category: str = "") -> dict[str, str]:
     return {k: v for k, v in tags.items() if k in allowed}
 
 
-def _feature_to_poi(el: dict[str, Any], category: str) -> dict[str, Any]:
+def _extract_geometry(el: dict[str, Any], category: str) -> dict[str, Any] | None:
+    """Return a GeoJSON geometry dict for an Overpass element, or None."""
+    el_type = el.get("type")
+    if el_type == "node":
+        lat, lon = el.get("lat"), el.get("lon")
+        if lat is None or lon is None:
+            return None
+        return {"type": "Point", "coordinates": [lon, lat]}
+    if el_type == "way":
+        raw = el.get("geometry", [])
+        coords = [[g["lon"], g["lat"]] for g in raw if "lon" in g and "lat" in g]
+        if not coords:
+            return None
+        if category == "forest":
+            # Ensure the ring is closed
+            if coords[0] != coords[-1]:
+                coords.append(coords[0])
+            return {"type": "Polygon", "coordinates": [coords]}
+        return {"type": "LineString", "coordinates": coords}
+    return None
+
+
+def _feature_to_poi(el: dict[str, Any], category: str, use_geom: bool = False) -> dict[str, Any]:
     tags = el.get("tags", {})
     center = el.get("center") or el
+    geometry = _extract_geometry(el, category) if use_geom else None
     return {
         "id": f"{el['type']}/{el['id']}",
         "type": el["type"],
         "osm_id": el["id"],
         "lat": center.get("lat"),
         "lon": center.get("lon"),
+        "geometry": geometry,
         "tags": _filter_tags(tags, category),
     }
 
@@ -165,6 +201,7 @@ class OsmPoiAdapter(SourceAdapter):
 
         async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
             for i, batch in enumerate(BATCHES):
+                use_geom = batch.get("geom", False)
                 query = _build_query(batch, b)
                 try:
                     elements = await self._query_batch(client, query)
@@ -177,12 +214,12 @@ class OsmPoiAdapter(SourceAdapter):
                     category = _classify(tags)
                     if category == "other":
                         continue
-                    poi = _feature_to_poi(el, category)
-                    if poi["lat"] is None or poi["lon"] is None:
+                    poi = _feature_to_poi(el, category, use_geom=use_geom)
+                    # Keep the feature if it has either a geometry or a lat/lon centroid
+                    if poi["geometry"] is None and (poi["lat"] is None or poi["lon"] is None):
                         continue
                     categories.setdefault(category, []).append(poi)
 
-                # Brief pause between batches to be polite to the server
                 if i < len(BATCHES) - 1:
                     await asyncio.sleep(1)
 

@@ -676,19 +676,21 @@ async def map_data_osm_poi(
     for cat_id, items in categories.items():
         label = cat_id.replace("_", " ").title()
         for item in items:
-            lat = item.get("lat")
-            lon = item.get("lon")
-            if lat is None or lon is None:
-                continue
+            geom = item.get("geometry")
+            if geom is None:
+                lat = item.get("lat")
+                lon = item.get("lon")
+                if lat is None or lon is None:
+                    continue
+                geom = {"type": "Point", "coordinates": [lon, lat]}
             tags = item.get("tags", {})
             features.append({
                 "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "geometry": geom,
                 "properties": {
                     "_collection": f"poi-{cat_id}",
                     "_label": label,
-                    "name": tags.get("name", ""),
-                    "amenity": tags.get("amenity", ""),
+                    **tags,
                 },
             })
     features = filter_features_by_bbox(features, parse_bbox_param(bbox))

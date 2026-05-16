@@ -1416,6 +1416,7 @@
       { id: "poi-emergency_services", label: "Emergency Services", color: "#c46c32" },
       { id: "poi-government", label: "Government", color: "#195d85" },
       { id: "poi-industry", label: "Industry", color: "#5a6a61" },
+      { id: "poi-forest", label: "Forest", color: "#2d6a2d" },
       { id: "poi-military", label: "Military Zones", color: "#8b1a1a" },
       { id: "poi-airfields", label: "Airfields & Helipads", color: "#888" },
       { id: "poi-fuel_supply", label: "Fuel & Supply Points", color: "#c4a832" },
@@ -1460,7 +1461,7 @@
       },
       {
         name: "Civilian & Logistics",
-        ids: ["poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-religion"],
+        ids: ["poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-forest", "poi-religion"],
       },
       {
         name: "Satellites",
@@ -1475,7 +1476,7 @@
 
     const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites", "digitraffic-road-surface"];
     const CUSTOM_LOAD_SOURCE_IDS = ["nls", "statistics-finland", "digiroad", "osm-poi"];
-    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-religion"]);
+    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-forest", "poi-religion"]);
 
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
@@ -1507,10 +1508,11 @@
       "poi-government": { point: true, color: "#195d85" },
 
       "poi-industry": { point: true, color: "#5a6a61" },
+      "poi-forest": { forest: true },
       "poi-military": { point: true, color: "#8b1a1a" },
       "poi-airfields": { point: true, color: "#555" },
       "poi-fuel_supply": { point: true, color: "#c4a832" },
-      "poi-power_infrastructure": { point: true, color: "#f0a500" },
+      "poi-power_infrastructure": { color: "#f0a500", weight: 1.5, fill: false, opacity: 0.75 },
       celltowers: { point: true, color: "#888" },
       satellites: { point: true, color: "#195d85" },
       bridges: { color: "#c46c32", weight: 2.5, fill: false },
@@ -1638,15 +1640,32 @@
 
       ALL_OVERLAY_COLLECTIONS.forEach((collection) => {
         const style = COLL_STYLE[collection.id] || { color: "#888", weight: 1 };
+
+        // Forest polygons: dark green for needleleaved (pine/spruce), medium for broadleaved/mixed.
+        const styleOrFn = style.forest
+          ? (feature) => {
+              const leaf = feature.properties?.leaf_type || "";
+              const fillColor = leaf === "needleleaved" ? "#0d3d18"
+                              : leaf === "broadleaved"  ? "#3a8c2a"
+                              :                          "#1f6b2e";
+              return { color: "#0a2e12", weight: 0.5, fillColor, fillOpacity: 0.38 };
+            }
+          : style.point ? undefined : style;
+
         const layer = L.geoJSON(null, {
-          style: style.point ? undefined : style,
-          pointToLayer: (_, latlng) => L.circleMarker(latlng, {
-            radius: collection.id === "celltowers" ? 6 : 5,
-            fillColor: style.color || "#888",
-            color: "#fff",
-            weight: 1,
-            fillOpacity: 0.82,
-          }),
+          style: styleOrFn,
+          // pointToLayer fires for Point geometry regardless of whether style is a function.
+          // This handles power substation nodes mixed in with line features.
+          pointToLayer: (feat, latlng) => {
+            const fc = style.color || (feat.properties?._collection === "poi-power_infrastructure" ? "#f0a500" : "#888");
+            return L.circleMarker(latlng, {
+              radius: collection.id === "celltowers" ? 6 : 5,
+              fillColor: fc,
+              color: "#fff",
+              weight: 1,
+              fillOpacity: 0.82,
+            });
+          },
           onEachFeature: (feature, layerRef) => {
             const props = feature.properties || {};
             const name = props.nimi || props.namn || props.name || props["name:fi"] || "";
