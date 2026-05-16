@@ -130,7 +130,7 @@ class StatisticsFinlandAdapter(SourceAdapter):
             "total": total,
             "male": male,
             "female": female,
-            "per_municipality": per_muni,
+            "per_muni": per_muni,
         }
 
     def _extract_age_distribution(
