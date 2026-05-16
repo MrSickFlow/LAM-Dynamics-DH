@@ -21,6 +21,7 @@ class SourceCategory(str, Enum):
 
 class SourceStatus(str, Enum):
     IDLE = "idle"
+    RUNNING = "running"
     READY = "ready"
     ERROR = "error"
     DISABLED = "disabled"

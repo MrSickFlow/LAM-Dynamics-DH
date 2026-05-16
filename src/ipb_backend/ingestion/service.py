@@ -54,6 +54,7 @@ class IngestionService:
         if adapter is None:
             raise ValueError(f"No adapter configured for source id: {source_id}")
 
+        self._registry.update(definition.model_copy(update={"status": SourceStatus.RUNNING}))
         try:
             record = await adapter.fetch(area, timeframe, load_target)
             updated_definition = definition.model_copy(

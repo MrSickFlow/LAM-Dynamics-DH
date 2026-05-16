@@ -3163,7 +3163,7 @@
         // Ingest returns 202 immediately and runs in the background.
         // Poll /api/sources every 2s until all enabled sources leave "idle" state (max 60s).
         const enabledIds = new Set((await ingestResponse.json()).source_ids || []);
-        const deadline = Date.now() + 60_000;
+        const deadline = Date.now() + 90_000;
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 2000));
           const pollResp = await fetch("/api/sources");
