@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     auto_refresh: bool = False
     refresh_interval_seconds: int = 1800
     analysis_provider: str = "rules"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-haiku-4-5-20251001"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "llama3.1:8b"
     ollama_timeout_seconds: float = 45.0

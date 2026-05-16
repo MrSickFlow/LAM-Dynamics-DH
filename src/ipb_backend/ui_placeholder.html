@@ -1129,17 +1129,6 @@
           </div>
         </div>
 
-        <div class="panel-card is-collapsible" id="agents-panel">
-          <button class="panel-card-header" id="agents-panel-toggle" type="button" aria-expanded="true">
-            <div class="panel-title">Analysis Agents</div>
-            <span class="collapse-icon">▾</span>
-          </button>
-          <div class="panel-card-body" id="agents-panel-body">
-            <div class="panel-copy">Run individual analysis agents against the current workspace area.</div>
-            <div id="agent-buttons"></div>
-          </div>
-        </div>
-
         <div class="panel-card is-collapsible" id="planning-panel">
           <button class="panel-card-header" id="planning-panel-toggle" type="button" aria-expanded="false">
             <div class="panel-title">Mission Planning</div>
@@ -1239,83 +1228,54 @@
       <div class="map-watermark">Selection: <strong id="selection-label">No AOI selected</strong></div>
     </div>
 
-    <aside class="inspector">
+    <aside class="inspector" id="inspector-panel">
       <div class="section">
         <div class="section-body">
-          <h1 class="headline">AOI Inspector</h1>
-          <p class="subhead">Raw source data, source freshness, grounded agent interpretation, and follow-up conversation all track the AOI you draw on the map.</p>
+          <h1 class="headline">AOI Analysis</h1>
+          <p class="subhead" id="selection-meta">Draw a polygon on the map to inspect the area and start a conversation with the AI analyst.</p>
         </div>
       </div>
 
-      <div class="section is-collapsible" data-section>
+      <div class="section is-collapsible" data-section id="chat-section">
         <button class="section-toggle" type="button" aria-expanded="true">
-          <div class="section-header">AOI Metrics</div>
-          <span class="collapse-icon">▾</span>
-        </button>
-        <div class="section-body">
-          <div class="metrics-grid" id="metrics-grid"></div>
-          <div class="selection-meta" id="selection-meta">Draw an AOI to inspect intersecting source data.</div>
-        </div>
-      </div>
-
-      <div class="section is-collapsible" data-section>
-        <button class="section-toggle" type="button" aria-expanded="true">
-          <div class="section-header">Agent Interpreter</div>
-          <span class="collapse-icon">▾</span>
-        </button>
-        <div class="section-body">
-          <p class="agent-summary" id="agent-summary">Awaiting an AOI. The grounded agent summary will cite the intersecting evidence bundle here.</p>
-          <div class="agent-meta" id="agent-meta"></div>
-          <div class="conversation-toolbar">
-            <div class="bullet-group-label">Weather</div>
-          </div>
-          <div class="weather-grid" id="weather-grid">
-            <div class="weather-metric"><div class="val" id="w-temp">--</div><div class="lbl">Temp</div></div>
-            <div class="weather-metric"><div class="val" id="w-wind">--</div><div class="lbl">Wind</div></div>
-            <div class="weather-metric"><div class="val" id="w-humidity">--</div><div class="lbl">Humidity</div></div>
-            <div class="weather-metric"><div class="val" id="w-pressure">--</div><div class="lbl">Pressure</div></div>
-            <div class="weather-metric"><div class="val" id="w-vis">--</div><div class="lbl">Visibility</div></div>
-            <div class="weather-metric"><div class="val" id="w-cloud">--</div><div class="lbl">Cloud</div></div>
-          </div>
-          <div class="weather-station" id="w-station">No weather data loaded</div>
-          <div class="bullet-group-label">Findings</div>
-          <div class="bullet-list" id="agent-findings"></div>
-          <div class="agent-limitations" id="agent-limitations"></div>
-          <div class="bullet-group-label">Evidence</div>
-          <div class="bullet-list" id="agent-evidence"></div>
-        </div>
-      </div>
-
-      <div class="section is-collapsible" data-section>
-        <button class="section-toggle" type="button" aria-expanded="true">
-          <div class="section-header">Conversation Window</div>
+          <div class="section-header">AI Analyst Chat</div>
           <span class="collapse-icon">▾</span>
         </button>
         <div class="section-body">
           <div class="conversation-toolbar">
-            <label for="analysis-profile">Analysis Profile</label>
+            <label for="analysis-profile">Profile</label>
             <select id="analysis-profile" class="profile-select"></select>
           </div>
           <div class="conversation-context" id="conversation-context"></div>
           <div class="chat-thread" id="chat-thread"></div>
           <div class="chat-composer">
-            <textarea id="chat-input" class="chat-input" placeholder="Ask about mobility, concealment, surveillance, infrastructure resilience, logistics, or communications using only the AOI evidence package." disabled></textarea>
+            <textarea id="chat-input" class="chat-input" placeholder="Draw an AOI polygon on the map first, then ask about mobility, concealment, surveillance, logistics, or communications..." disabled></textarea>
             <button class="btn btn-primary chat-send" id="chat-send-btn" type="button" disabled>Send</button>
           </div>
-          <div class="conversation-note">The conversation agent only receives normalized source digests, derived indicators, evidence ids, and quality guardrails. Raw extraction stays deterministic.</div>
         </div>
       </div>
 
-      <div class="section is-collapsible" data-section>
-        <button class="section-toggle" type="button" aria-expanded="true">
-          <div class="section-header">Agent Run Results</div>
+      <div class="section is-collapsible is-collapsed" data-section>
+        <button class="section-toggle" type="button" aria-expanded="false">
+          <div class="section-header">AOI Metrics</div>
           <span class="collapse-icon">▾</span>
         </button>
         <div class="section-body">
-          <div id="agent-run-display">
-            <p class="empty-state">Run an agent from the settings panel to see results here.</p>
-          </div>
+          <div class="metrics-grid" id="metrics-grid"></div>
         </div>
+      </div>
+
+      <!-- hidden elements kept for JS compatibility -->
+      <div style="display:none">
+        <p id="agent-summary"></p>
+        <div id="agent-meta"></div>
+        <div id="agent-findings"></div>
+        <div id="agent-limitations"></div>
+        <div id="agent-evidence"></div>
+        <div id="agent-run-display"></div>
+        <div id="w-temp"></div><div id="w-wind"></div><div id="w-humidity"></div>
+        <div id="w-pressure"></div><div id="w-vis"></div><div id="w-cloud"></div>
+        <div id="w-station"></div><div class="weather-grid" id="weather-grid"></div>
       </div>
 
       <div class="section is-collapsible" data-section>
@@ -2694,7 +2654,7 @@
 
     function renderEmptyInspector(message) {
       renderMetrics(null);
-      selectionMeta.textContent = message || "Draw an AOI to inspect intersecting source data.";
+      selectionMeta.textContent = message || "Draw a polygon on the map to inspect the area and start a conversation with the AI analyst.";
       renderAgent(null);
       renderConversationEmpty(message);
       renderFreshness(state.sources);
@@ -2704,10 +2664,11 @@
     function renderInspection(payload) {
       state.latestInspection = payload;
       selectionLabel.textContent = `${payload.metrics.selection_area_sqkm} km2 AOI`;
-      selectionMeta.textContent = `Bounds: ${payload.selection.bounds.map((value) => value.toFixed(3)).join(", ")}`;
+      selectionMeta.textContent = `${payload.metrics.selection_area_sqkm} km² · Bounds: ${payload.selection.bounds.map((v) => v.toFixed(3)).join(", ")}`;
       renderMetrics(payload.metrics);
       renderAgent(payload.agent);
       setConversationFromInspection(payload);
+      document.getElementById("chat-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
       renderFreshness(payload.freshness);
       renderRawData(payload.raw_sections, payload.raw_data);
     }
@@ -2853,6 +2814,7 @@
 
     function renderAgentButtons() {
       const container = document.getElementById("agent-buttons");
+      if (!container) return;
       container.innerHTML = "";
       AGENTS_LIST.forEach((agent) => {
         const btn = document.createElement("button");
@@ -2900,6 +2862,7 @@
 
     function displayAgentRunResult(agentId, result) {
       const display = document.getElementById("agent-run-display");
+      if (!display) return;
       const agent = AGENTS_LIST.find((a) => a.id === agentId);
       const label = agent ? agent.label : agentId;
 
@@ -2961,14 +2924,6 @@
       overlayPanel.classList.toggle("is-collapsed");
       const expanded = !overlayPanel.classList.contains("is-collapsed");
       overlayPanelToggle.setAttribute("aria-expanded", String(expanded));
-    });
-
-    const agentsPanel = document.getElementById("agents-panel");
-    const agentsPanelToggle = document.getElementById("agents-panel-toggle");
-    agentsPanelToggle.addEventListener("click", () => {
-      agentsPanel.classList.toggle("is-collapsed");
-      const expanded = !agentsPanel.classList.contains("is-collapsed");
-      agentsPanelToggle.setAttribute("aria-expanded", String(expanded));
     });
 
     inspectorSections.forEach((section) => {
