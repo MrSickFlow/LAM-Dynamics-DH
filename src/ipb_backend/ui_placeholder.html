@@ -212,7 +212,7 @@
   <script>
     const state = {
       area: "North Karelia", timeframe: "72h",
-      map: null, mapDataLayer: null, layers: [],
+      map: null, collectionLayers: {}, layers: [],
       sources: [], weatherRecord: null,
     };
 
@@ -232,41 +232,81 @@
       return [62.8, 30.2];
     }
 
+    const COLL_STYLE = {
+      tieviiva: { color: "#c46c32", weight: 2, fill: false },
+      rakennus: { color: "#195d85", weight: 1, fillOpacity: 0.2 },
+      jarvi: { color: "#215347", weight: 1, fillOpacity: 0.15 },
+      meri: { color: "#215347", weight: 1, fillOpacity: 0.15 },
+      virtavesialue: { color: "#215347", weight: 1.5, fill: false },
+      korkeuskayra: { color: "#5a6a61", weight: 1, fill: false },
+      suo: { color: "#5a6a61", weight: 1, fillOpacity: 0.15 },
+      kallioalue: { color: "#5a6a61", weight: 1, fillOpacity: 0.1 },
+      metsamaankasvillisuus: { color: "#2a8a5c", weight: 1, fillOpacity: 0.15 },
+      maatalousmaa: { color: "#c4a832", weight: 1, fillOpacity: 0.15 },
+      taajaanrakennettualue: { color: "#195d85", weight: 1, fillOpacity: 0.2 },
+      rautatie: { color: "#c46c32", weight: 1.5, fill: false },
+      sahkolinja: { color: "#c46c32", weight: 1, fill: false, dashArray: "6,4" },
+      paikannimi: { point: true, color: "#c46c32" },
+      kunta: { color: "#195d85", weight: 2, fillOpacity: 0.1 },
+      kunnanhallintoraja: { color: "#195d85", weight: 1.5, dashArray: "4,4", fill: false },
+      luonnonsuojelualue: { color: "#2a8a5c", weight: 1, fillOpacity: 0.08 },
+      lentokenttaalue: { color: "#888", weight: 1, fillOpacity: 0.1 },
+      satamaalue: { color: "#215347", weight: 1, fillOpacity: 0.1 },
+      rautatieliikennepaikka: { point: true, color: "#c46c32" },
+      osoitepiste: { point: true, color: "#888" },
+    };
+
     function initMap() {
       state.map = L.map("map", { zoomControl: true }).setView(getCenter(state.area), 9);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://openstreetmap.org/copyright">OSM</a>', maxZoom: 18,
       }).addTo(state.map);
 
-      state.mapDataLayer = L.geoJSON(null, {
-        style: (f) => ({
-          color: f.properties._collection === "tieviiva" ? "#c46c32"
-            : f.properties._collection === "rakennus" ? "#195d85"
-            : f.properties._collection === "jarvi" || f.properties._collection === "meri" ? "#215347"
-            : "#5a6a61",
-          weight: f.geometry?.type === "LineString" ? 2 : 1,
-          fillOpacity: 0.2,
-        }),
-        pointToLayer: (f, ll) => {
-          const c = f.properties._collection === "paikannimi" ? "#c46c32" : "#195d85";
-          return L.circleMarker(ll, { radius: 5, fillColor: c, color: "#fff", weight: 1, fillOpacity: 0.8 });
-        },
-        onEachFeature: (f, layer) => {
-          const p = f.properties || {};
-          const label = p._label || p._collection || "";
-          const name = p.nimi || "";
-          layer.bindPopup(`<b>${label}</b>${name ? `<br>${name}` : ""}`);
-        },
-      }).addTo(state.map);
+      NLS_COLLECTIONS.forEach((coll) => {
+        const style = COLL_STYLE[coll.id] || { color: "#888", weight: 1 };
+        const layer = L.geoJSON(null, {
+          style: style.point ? undefined : style,
+          pointToLayer: (f, ll) => {
+            const c = style.color || "#888";
+            return L.circleMarker(ll, { radius: 5, fillColor: c, color: "#fff", weight: 1, fillOpacity: 0.8 });
+          },
+          onEachFeature: (f, layer) => {
+            const p = f.properties || {};
+            const name = p.nimi || p.namn || "";
+            layer.bindPopup(`<b>${coll.label}</b>${name ? `<br>${name}` : ""}`);
+          },
+        });
+        state.collectionLayers[coll.id] = layer;
+      });
     }
 
     async function loadMapData() {
       try {
         const resp = await fetch(`/api/map-data/nls?area=${encodeURIComponent(state.area)}`);
         const geojson = await resp.json();
-        state.mapDataLayer.clearLayers();
-        state.mapDataLayer.addData(geojson);
-        statusLine.textContent = `Synced. ${geojson.features.length} features on map.`;
+        // Clear all collection layers
+        Object.values(state.collectionLayers).forEach((l) => l.clearLayers());
+        // Group features by _collection and add to respective layer
+        const grouped = {};
+        geojson.features.forEach((f) => {
+          const coll = f.properties?._collection;
+          if (coll) {
+            if (!grouped[coll]) grouped[coll] = [];
+            grouped[coll].push(f);
+          }
+        });
+        let total = 0;
+        Object.entries(grouped).forEach(([coll, features]) => {
+          const layer = state.collectionLayers[coll];
+          if (layer) {
+            layer.addData({ type: "FeatureCollection", features });
+            total += features.length;
+            // Show on map if its overlay checkbox is checked
+            const cb = document.querySelector(`input[data-collection="${coll}"]`);
+            if (!cb || cb.checked) layer.addTo(state.map);
+          }
+        });
+        statusLine.textContent = `Synced. ${total} features on map.`;
       } catch (e) { console.error("Map data load failed:", e); }
     }
 
@@ -311,16 +351,13 @@
 
     function toggleOverlay(e) {
       const coll = e.target.dataset.collection;
-      if (!state.mapDataLayer || !coll) return;
-      state.mapDataLayer.eachLayer((layer) => {
-        if (layer.feature?.properties?._collection === coll) {
-          if (e.target.checked) {
-            if (!state.map.hasLayer(layer)) layer.addTo(state.map);
-          } else {
-            if (state.map.hasLayer(layer)) state.map.removeLayer(layer);
-          }
-        }
-      });
+      const layer = state.collectionLayers?.[coll];
+      if (!layer) return;
+      if (e.target.checked) {
+        layer.addTo(state.map);
+      } else {
+        state.map.removeLayer(layer);
+      }
     }
 
     function renderSources() {

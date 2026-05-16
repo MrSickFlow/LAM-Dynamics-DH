@@ -103,9 +103,10 @@ def test_health_endpoint():
 def test_ui_demo_contains_workspace_shell():
     response = client.get("/api/ui-demo")
     assert response.status_code == 200
-    assert "Map-first home screen with modular windows." in response.text
-    assert "Right-side dashboard" in response.text
-    assert "Weather information" in response.text
+    assert "Overlay Settings" in response.text
+    assert "Current Weather" in response.text
+    assert "Data Sources" in response.text
+    assert "Navigation" in response.text
 
 
 def test_ingestion_flow_for_placeholder_sources():
@@ -121,12 +122,11 @@ def test_ingestion_flow_for_placeholder_sources():
     assert ingest_response.status_code == 200
     payload = ingest_response.json()
     assert set(payload["requested_sources"]) == {"nls", "statistics-finland", "digiroad"}
-    # NLS requires API key, statistics-finland and digiroad are still placeholders
-    assert len(payload["produced_records"]) == 2
+    assert len(payload["produced_records"]) == 3
 
     datasets_response = client.get("/api/datasets")
     assert datasets_response.status_code == 200
-    assert len(datasets_response.json()) == 2
+    assert len(datasets_response.json()) == 3
 
 
 def test_fmi_ingestion_flow(monkeypatch):
