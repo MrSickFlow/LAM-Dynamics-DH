@@ -76,7 +76,7 @@ class DigiroadAdapter(SourceAdapter):
                 url = f"{self.BASE_URL}/collections/{coll_id}/items"
                 params: dict[str, Any] = {
                     "bbox": bbox_str,
-                    "limit": 100,
+                    "limit": 10000,
                     "f": "json",
                 }
                 try:
@@ -89,7 +89,7 @@ class DigiroadAdapter(SourceAdapter):
                         "label": self.COLLECTIONS[coll_id],
                         "number_matched": number_matched,
                         "number_returned": len(features),
-                        "features": features[:100],
+                        "features": features,
                     }
                 except Exception as e:
                     return coll_id, {
