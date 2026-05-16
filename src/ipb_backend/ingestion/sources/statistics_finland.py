@@ -284,6 +284,18 @@ class StatisticsFinlandAdapter(SourceAdapter):
         bbox: tuple[float, float, float, float],
         pop_data: dict[str, Any],
     ) -> list[dict]:
+        target_population = int(pop_data.get("total", 0) or 0)
+        if target_population <= 0:
+            return []
+
+        return self._hotspot_features(area, bbox, pop_data)
+
+    def _hotspot_features(
+        self,
+        area: str,
+        bbox: tuple[float, float, float, float],
+        pop_data: dict[str, Any],
+    ) -> list[dict]:
         min_x, min_y, max_x, max_y = bbox
         width = max_x - min_x
         height = max_y - min_y
@@ -292,8 +304,8 @@ class StatisticsFinlandAdapter(SourceAdapter):
         priority_zones = AREA_PRIORITY_ZONES.get(area_name, {})
         target_population = int(pop_data.get("total", 0) or 0)
         per_muni = pop_data.get("per_muni", {})
-        columns = 24
-        rows = 24
+        columns = 48
+        rows = 48
 
         def ring(x0: float, y0: float, x1: float, y1: float) -> list[list[float]]:
             return [[
