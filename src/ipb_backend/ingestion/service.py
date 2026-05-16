@@ -25,13 +25,25 @@ class IngestionService:
             missing_list = ", ".join(sorted(missing_source_ids))
             raise ValueError(f"Unknown source ids: {missing_list}")
 
-        tasks = {asyncio.ensure_future(self._fetch_one(sid, request.area, request.timeframe, request.load_target)): sid for sid in source_ids}
-        done, pending = await asyncio.wait(tasks.keys(), timeout=55.0)
-        for task in pending:
-            task.cancel()
-        records = [r for task in done if (r := task.result()) is not None]
+        tasks = [
+            self._fetch_one_timed(source_id, request.area, request.timeframe, request.load_target)
+            for source_id in source_ids
+        ]
+        records = [r for r in await asyncio.gather(*tasks) if r is not None]
         self._records.extend(records)
         return IngestionResult(requested_sources=source_ids, produced_records=records)
+
+    async def _fetch_one_timed(self, source_id: str, area: str, timeframe: str, load_target=None):
+        try:
+            return await asyncio.wait_for(
+                self._fetch_one(source_id, area, timeframe, load_target),
+                timeout=50.0,
+            )
+        except asyncio.TimeoutError:
+            definition = self._registry.get(source_id)
+            updated = definition.model_copy(update={"status": SourceStatus.ERROR, "last_error": "Ingestion timed out after 50s"})
+            self._registry.update(updated)
+            return None
 
     async def _fetch_one(self, source_id: str, area: str, timeframe: str, load_target=None):
         definition = self._registry.get(source_id)

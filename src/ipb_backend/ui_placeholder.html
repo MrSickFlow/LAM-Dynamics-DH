@@ -1480,6 +1480,8 @@
       { id: "poi-emergency_services", label: "Emergency Services", color: "#c46c32" },
       { id: "poi-government", label: "Government", color: "#195d85" },
       { id: "poi-industry", label: "Industry", color: "#5a6a61" },
+      { id: "poi-logistics", label: "Logistics & Depots", color: "#7b4f1e" },
+      { id: "poi-ports_terminals", label: "Ports & Terminals", color: "#195d85" },
       { id: "poi-forest", label: "Forest", color: "#2d6a2d" },
       { id: "poi-military", label: "Military Zones", color: "#8b1a1a" },
       { id: "poi-airfields", label: "Airfields & Helipads", color: "#888" },
@@ -1524,8 +1526,12 @@
         ids: ["poi-military", "poi-airfields", "poi-fuel_supply", "poi-power_infrastructure", "celltowers"],
       },
       {
-        name: "Civilian & Logistics",
-        ids: ["poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-forest", "poi-religion"],
+        name: "Logistics & Industry",
+        ids: ["poi-logistics", "poi-ports_terminals", "poi-industry", "poi-fuel_supply"],
+      },
+      {
+        name: "Civilian & Terrain",
+        ids: ["poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-forest", "poi-religion"],
       },
       {
         name: "Satellites",
@@ -1540,7 +1546,7 @@
 
     const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites", "digitraffic-road-surface"];
     const CUSTOM_LOAD_SOURCE_IDS = ["nls", "statistics-finland", "digiroad", "osm-poi"];
-    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-forest", "poi-religion"]);
+    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-logistics", "poi-ports_terminals", "poi-forest", "poi-religion"]);
 
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
@@ -1572,6 +1578,8 @@
       "poi-government": { point: true, color: "#195d85" },
 
       "poi-industry": { point: true, color: "#5a6a61" },
+      "poi-logistics": { point: true, color: "#7b4f1e" },
+      "poi-ports_terminals": { point: true, color: "#195d85" },
       "poi-forest": { forest: true },
       "poi-military": { point: true, color: "#8b1a1a" },
       "poi-airfields": { point: true, color: "#555" },
@@ -2139,7 +2147,9 @@
       "poi-religion":         "Churches, mosques, temples and other places of worship. Often large, structurally robust buildings used historically as field hospitals, shelters or command posts.",
       "poi-emergency_services": "Police stations, fire stations and ambulance depots. Civil emergency response nodes — their status indicates local governance capability and civilian security.",
       "poi-government":       "Town halls, courthouses, prisons, embassies and community centres. Administrative and civil authority nodes; often hardened or significant buildings.",
-      "poi-industry":         "Industrial, commercial and warehouse zones. Potential sources of vehicles, fuel, tools and construction materials; also possible staging or logistics areas.",
+      "poi-industry":         "General industrial and commercial zones including landuse=industrial and man_made=works. Potential sources of vehicles, equipment, fuel, tools and materials.",
+      "poi-logistics":        "High-capacity logistics targets: sawmills, timber processors, cold storage facilities, distribution depots, agrarian supply stores, farmyards and marketplaces. A commander could commandeer these for indoor staging areas, heavy equipment or bulk supplies.",
+      "poi-ports_terminals":  "Maritime and road transit chokepoints: ferry terminals, docks, boatyards, inland ports and bus stations. Key nodes for supply chain interdiction or exploitation — especially critical in Finland's lake and coastal regions.",
       "poi-forest":           "Forest polygon areas from OSM, coloured by tree type: dark green = needleleaved (pine/spruce — dominant in Finland), medium green = broadleaved, mid green = mixed/untagged. Use for concealment, movement and observation planning.",
       // POI — Military / Infrastructure
       "poi-military":         "Designated military areas, installations and training grounds from OSM. May include barracks, ranges, depots and restricted areas.",
@@ -3149,6 +3159,22 @@
         });
         if (!ingestResponse.ok) {
           throw new Error(`Workspace ingest failed with ${ingestResponse.status}`);
+        }
+        // Ingest returns 202 immediately and runs in the background.
+        // Poll /api/sources every 2s until all enabled sources leave "idle" state (max 60s).
+        const enabledIds = new Set((await ingestResponse.json()).source_ids || []);
+        const deadline = Date.now() + 60_000;
+        while (Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, 2000));
+          const pollResp = await fetch("/api/sources");
+          if (!pollResp.ok) break;
+          const sources = await pollResp.json();
+          const allDone = sources
+            .filter(s => enabledIds.has(s.source_id))
+            .every(s => s.status !== "idle" && s.status !== "running");
+          if (allDone) break;
+          const ready = sources.filter(s => enabledIds.has(s.source_id) && s.status === "ready").length;
+          statusLine.innerHTML = `<span class="status-spinner"></span>Loading sources… ${ready}/${enabledIds.size} ready`;
         }
       } catch (error) {
         console.error("Ingest failed:", error);

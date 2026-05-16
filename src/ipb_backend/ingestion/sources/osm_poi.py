@@ -54,7 +54,9 @@ BATCHES: list[dict[str, Any]] = [
         "industry":         ('node["landuse"~"industrial|commercial|retail"]({b});'
                              'way["landuse"~"industrial|commercial|retail"]({b});'
                              'node["building"~"industrial|warehouse|factory"]({b});'
-                             'way["building"~"industrial|warehouse|factory"]({b});'),
+                             'way["building"~"industrial|warehouse|factory"]({b});'
+                             'node["man_made"="works"]({b});'
+                             'way["man_made"="works"]({b});'),
     }},
     # Batch 4 — power infrastructure as lines + key point assets (substations/plants).
     # Towers/poles are omitted: 3000+ individual points add noise; the line geometry
@@ -70,6 +72,30 @@ BATCHES: list[dict[str, Any]] = [
         "forest":           ('way["natural"="wood"]({b});'
                              'way["landuse"="forest"]({b});'),
     }},
+    # Batch 6 — logistics & transport hubs.
+    # logistics: specific high-capacity storage/processing targets a commander could commandeer
+    #   (sawmills, cold storage, distribution depots, agrarian supply, farmyards).
+    # ports_terminals: maritime and road transit chokepoints.
+    {"geom": False, "queries": {
+        "logistics":        ('node["industrial"~"warehouse|distribution|sawmill|timber|cold_storage|depot|wood_processing"]({b});'
+                             'way["industrial"~"warehouse|distribution|sawmill|timber|cold_storage|depot|wood_processing"]({b});'
+                             'node["building"~"storage_tank|barn"]({b});'
+                             'way["building"~"storage_tank|barn"]({b});'
+                             'node["shop"~"agrarian|hardware|doityourself|wholesale"]({b});'
+                             'way["shop"~"agrarian|hardware|doityourself|wholesale"]({b});'
+                             'node["landuse"="farmyard"]({b});'
+                             'way["landuse"="farmyard"]({b});'
+                             'node["amenity"="marketplace"]({b});'
+                             'way["amenity"="marketplace"]({b});'),
+        "ports_terminals":  ('node["amenity"="ferry_terminal"]({b});'
+                             'way["amenity"="ferry_terminal"]({b});'
+                             'node["waterway"~"boatyard|dock"]({b});'
+                             'way["waterway"~"boatyard|dock"]({b});'
+                             'node["landuse"="port"]({b});'
+                             'way["landuse"="port"]({b});'
+                             'node["amenity"="bus_station"]({b});'
+                             'way["amenity"="bus_station"]({b});'),
+    }},
 ]
 
 
@@ -81,16 +107,25 @@ def _build_query(batch: dict[str, Any], b: str) -> str:
     return f"[out:json][timeout:55];({union});out {out_mode} {limit};"
 
 
+_LOGISTICS_INDUSTRIAL = {"warehouse", "distribution", "sawmill", "timber", "cold_storage", "depot", "wood_processing"}
+_LOGISTICS_BUILDINGS  = {"storage_tank", "barn"}
+_LOGISTICS_SHOPS      = {"agrarian", "hardware", "doityourself", "wholesale"}
+_PORTS_AMENITIES      = {"ferry_terminal", "bus_station"}
+_PORTS_WATERWAYS      = {"boatyard", "dock"}
+
+
 def _classify(tags: dict[str, str]) -> str:
-    amenity = tags.get("amenity", "")
-    natural = tags.get("natural", "")
-    landuse = tags.get("landuse", "")
+    amenity  = tags.get("amenity", "")
+    natural  = tags.get("natural", "")
+    landuse  = tags.get("landuse", "")
     man_made = tags.get("man_made", "")
     military = tags.get("military", "")
-    aeroway = tags.get("aeroway", "")
-    power = tags.get("power", "")
+    aeroway  = tags.get("aeroway", "")
+    power    = tags.get("power", "")
     building = tags.get("building", "")
-    shop = tags.get("shop", "")
+    shop     = tags.get("shop", "")
+    industrial = tags.get("industrial", "")
+    waterway = tags.get("waterway", "")
 
     if amenity in {"school", "university", "college", "kindergarten", "childcare", "library"}:
         return "education"
@@ -112,7 +147,17 @@ def _classify(tags: dict[str, str]) -> str:
         return "military"
     if power in {"tower", "pole", "substation", "plant", "generator", "line", "minor_line", "cable"}:
         return "power_infrastructure"
-    if landuse in {"industrial", "commercial", "retail"} or building in {"industrial", "warehouse", "factory"}:
+    # Logistics: specific high-value targets (sawmills, depots, agrarian supply, farmyards)
+    if (industrial in _LOGISTICS_INDUSTRIAL
+            or building in _LOGISTICS_BUILDINGS
+            or shop in _LOGISTICS_SHOPS
+            or landuse == "farmyard"
+            or amenity == "marketplace"):
+        return "logistics"
+    # Ports & transit hubs
+    if amenity in _PORTS_AMENITIES or waterway in _PORTS_WATERWAYS or landuse == "port":
+        return "ports_terminals"
+    if landuse in {"industrial", "commercial", "retail"} or building in {"industrial", "warehouse", "factory"} or man_made == "works":
         return "industry"
     if natural == "wood" or landuse == "forest":
         return "forest"
@@ -123,9 +168,13 @@ ALLOWED_TAGS: dict[str, set[str]] = {
     "forest":               {"leaf_type", "leaf_cycle", "natural", "landuse", "name", "wood"},
     "military":             {"military", "name", "landuse", "access", "description"},
     "airfields":            {"aeroway", "name", "icao", "iata", "operator", "surface", "length", "width"},
-    "industry":             {"landuse", "building", "name", "operator", "industrial"},
+    "industry":             {"landuse", "building", "name", "operator", "industrial", "man_made", "product"},
     "fuel_supply":          {"amenity", "name", "brand", "opening_hours", "operator"},
     "power_infrastructure": {"power", "voltage", "name", "operator", "cables", "circuits"},
+    "logistics":            {"industrial", "building", "shop", "landuse", "amenity", "name",
+                             "operator", "product", "capacity", "cold_storage", "man_made"},
+    "ports_terminals":      {"amenity", "waterway", "landuse", "name", "operator",
+                             "ferry", "motor_vehicle", "opening_hours"},
     "_default":             {"amenity", "name", "religion", "denomination", "school", "healthcare",
                              "operator", "capacity", "drinking_water", "shop", "natural"},
 }
