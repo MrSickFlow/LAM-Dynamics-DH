@@ -25,11 +25,17 @@ class NationalLandSurveyAdapter(SourceAdapter):
     COLLECTIONS: dict[str, str] = {
         "tieviiva": "Road network",
         "rakennus": "Buildings",
-        "vesisto": "Water bodies",
-        "maastokohde": "Terrain features",
-        "pelto": "Agricultural fields",
+        "jarvi": "Lakes",
+        "meri": "Sea areas",
+        "virtavesialue": "Rivers and streams",
+        "korkeuskayra": "Elevation contours",
         "suo": "Bogs and marshes",
-        "korkeusviiva": "Elevation contours",
+        "kallioalue": "Rocky areas",
+        "metsamaankasvillisuus": "Forest vegetation",
+        "maatalousmaa": "Agricultural land",
+        "taajaanrakennettualue": "Densely built areas",
+        "rautatie": "Railways",
+        "sahkolinja": "Power lines",
     }
 
     COLLECTION_NAMES = tuple(COLLECTIONS.keys())
