@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional
 
@@ -38,6 +40,13 @@ from ipb_backend.models import (
     UiLayer,
     UiPlaceholderResponse,
 )
+from ipb_backend.planning import (
+    OPERATION_PROFILES,
+    PlanningRequest,
+    PlanningResponse,
+    recommend_sites,
+)
+from ipb_backend.planning.explainer import enrich_with_narratives
 from ipb_backend.spatial import clip_geojson_feature, geojson_to_shape, polygon_area_sqkm
 
 router = APIRouter()
@@ -867,3 +876,51 @@ async def run_agent(agent_id: str, area: str, timeframe: str, services=Depends(g
             return {"error": "NLS adapter not available"}
         return await PowerGridAgent(adapter).run(area=area, timeframe=timeframe)
     return {"error": f"Unknown agent: {agent_id}"}
+
+
+@router.get("/planning/profiles")
+async def planning_profiles():
+    return {
+        "operation_types": [
+            {"id": op_type.value, "weights": weights}
+            for op_type, weights in OPERATION_PROFILES.items()
+        ]
+    }
+
+
+@router.post("/planning/recommend", response_model=PlanningResponse)
+async def planning_recommend(
+    request: PlanningRequest, services=Depends(get_services)
+) -> PlanningResponse:
+    try:
+        records = services["ingestion_service"].records
+        latest = _latest_records_by_source(records)
+        freshness = _build_freshness(services, latest)
+
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                partial(recommend_sites, request, records=list(latest.values()), freshness=freshness),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if request.explain:
+            try:
+                response = await enrich_with_narratives(
+                    response, request.force, request.operation
+                )
+            except Exception as exc:
+                response = response.model_copy(
+                    update={
+                        "notes": response.notes
+                        + [f"Explainer disabled due to error: {exc}"]
+                    }
+                )
+
+        return response
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=f"Planning failed: {exc}") from exc

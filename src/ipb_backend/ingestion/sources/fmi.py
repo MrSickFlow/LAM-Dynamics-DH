@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 
 from ipb_backend.ingestion.base import SourceAdapter
-from ipb_backend.models import DatasetRecord
+from ipb_backend.models import DatasetRecord, LoadTarget
 
 
 FORECAST_PARAMETERS = ("Temperature", "Pressure", "Humidity", "TotalCloudCover", "WindSpeedMS", "WindDirection", "Precipitation1h", "Visibility")
@@ -56,7 +56,7 @@ class FmiAdapter(SourceAdapter):
         "xlink": "http://www.w3.org/1999/xlink",
     }
 
-    async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
+    async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
         place = self._resolve_place(area)
         start_time, end_time = self._resolve_time_window(timeframe)
         xml_payload = await self._fetch_xml(place, start_time, end_time)

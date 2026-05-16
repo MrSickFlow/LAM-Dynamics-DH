@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from ipb_backend.ingestion.base import SourceAdapter
-from ipb_backend.models import DatasetRecord
+from ipb_backend.models import DatasetRecord, LoadTarget
 
 
 class DemoSourceAdapter(SourceAdapter):
-    async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
+    async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
         return DatasetRecord(
             source_id=self.definition.source_id,
             category=self.definition.category,
