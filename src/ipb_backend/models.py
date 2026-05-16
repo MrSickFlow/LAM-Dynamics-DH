@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -41,14 +41,14 @@ class SourceDefinition(BaseModel):
     refresh_interval_seconds: int
     enabled: bool = True
     status: SourceStatus = SourceStatus.IDLE
-    last_successful_refresh: datetime | None = None
-    last_error: str | None = None
+    last_successful_refresh: Optional[datetime] = None
+    last_error: Optional[str] = None
 
 
 class IngestionRequest(BaseModel):
     area: str
     timeframe: str
-    source_ids: list[str] | None = None
+    source_ids: Optional[list[str]] = None
 
 
 class IngestionResult(BaseModel):

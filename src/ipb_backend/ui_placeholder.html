@@ -208,6 +208,8 @@
           <div class="weather-grid" id="weather-grid">
             <div class="weather-metric"><div class="val" id="w-temp">--</div><div class="lbl">Temp</div></div>
             <div class="weather-metric"><div class="val" id="w-wind">--</div><div class="lbl">Wind</div></div>
+            <div class="weather-metric"><div class="val" id="w-humidity">--</div><div class="lbl">Humidity</div></div>
+            <div class="weather-metric"><div class="val" id="w-pressure">--</div><div class="lbl">Pressure</div></div>
             <div class="weather-metric"><div class="val" id="w-vis">--</div><div class="lbl">Visibility</div></div>
             <div class="weather-metric"><div class="val" id="w-cloud">--</div><div class="lbl">Cloud</div></div>
           </div>
@@ -232,7 +234,8 @@
       area: "North Karelia", timeframe: "72h",
       map: null, collectionLayers: {}, layers: [],
       sources: [], weatherRecord: null,
-      weatherMarker: null,
+      weatherMarker: null, pointMarker: null,
+      weatherPickerActive: false, pointWeatherData: null,
     };
 
     const form = document.getElementById("scenario-form");
@@ -280,6 +283,12 @@
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://openstreetmap.org/copyright">OSM</a>', maxZoom: 18,
       }).addTo(state.map);
+
+      state.map.on("click", async (e) => {
+        if (!state.weatherPickerActive) return;
+        const { lat, lng } = e.latlng;
+        await fetchPointWeather(lat, lng);
+      });
 
       NLS_COLLECTIONS.forEach((coll) => {
         const style = COLL_STYLE[coll.id] || { color: "#888", weight: 1 };
@@ -409,6 +418,24 @@
           `;
           el.querySelector("input").addEventListener("change", toggleOverlay);
           body.appendChild(el);
+
+          const pickerEl = document.createElement("label");
+          pickerEl.className = "overlay-item";
+          pickerEl.style.marginTop = "4px";
+          pickerEl.innerHTML = `
+            <input type="checkbox" data-action="weather-picker" />
+            <span class="overlay-swatch" style="background:#c46c32"></span>
+            <span>Weather Picker <span style="font-weight:400;color:var(--muted)">(click map)</span></span>
+          `;
+          pickerEl.querySelector("input").addEventListener("change", (e) => {
+            state.weatherPickerActive = e.target.checked;
+            if (!state.weatherPickerActive && state.pointMarker) {
+              state.map.removeLayer(state.pointMarker);
+              state.pointMarker = null;
+            }
+            state.map.getContainer().style.cursor = state.weatherPickerActive ? "crosshair" : "";
+          });
+          body.appendChild(pickerEl);
         }
 
         cat.ids.forEach((id) => {
@@ -467,31 +494,82 @@
       });
     }
 
+    async function fetchPointWeather(lat, lng) {
+      statusLine.textContent = `Fetching weather for (${lat.toFixed(3)}, ${lng.toFixed(3)})...`;
+      try {
+        const resp = await fetch(`/api/weather/point?lat=${lat}&lon=${lng}&timeframe=24h`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        state.pointWeatherData = await resp.json();
+
+        if (state.pointMarker) state.map.removeLayer(state.pointMarker);
+        state.pointMarker = L.circleMarker([lat, lng], {
+          radius: 12, fillColor: "#c46c32", color: "#fff", weight: 3, fillOpacity: 0.8,
+        }).addTo(state.map).bindPopup("<b>Weather point</b><br>Click again to refresh").openPopup();
+
+        renderWeather();
+        statusLine.textContent = `Weather updated for (${lat.toFixed(3)}, ${lng.toFixed(3)})`;
+      } catch (e) {
+        console.error("Point weather fetch failed:", e);
+        statusLine.textContent = "Weather fetch failed";
+      }
+    }
+
+    function getObsValue(obs, key) { return obs?.[key]?.latest?.value; }
+
     function renderWeather() {
+      const pw = state.pointWeatherData;
+      const pwObs = pw?.observations?.observations || {};
+      const pwFc = pw?.forecast?.observations || {};
+      const pwStation = pw?.observations?.station || {};
+      const pwQuery = pw?.query || {};
+
       const r = state.weatherRecord;
-      const obs = r?.data?.observations || {};
-      const station = r?.data?.station || {};
-      const t = obs.temperature?.latest?.value;
-      const w = obs.wind_speed?.latest?.value;
-      const v = obs.visibility?.latest?.value;
-      const c = obs.cloud_cover?.latest?.value;
+      const areaObs = r?.data?.observations || {};
+      const areaStation = r?.data?.station || {};
+
+      const hasObs = pw && Object.keys(pwObs).length > 0;
+      const obs = hasObs ? pwObs : areaObs;
+      const station = hasObs ? pwStation : areaStation;
+      const fc = (pw && !hasObs) ? pwFc : (pw ? pwFc : {});
+
+      const t = getObsValue(obs, "temperature") ?? getObsValue(fc, "temperature");
+      const w = getObsValue(obs, "wind_speed") ?? getObsValue(fc, "wind_speed");
+      const v = getObsValue(obs, "visibility") ?? getObsValue(fc, "visibility");
+      const c = getObsValue(obs, "cloud_cover") ?? getObsValue(fc, "cloud_cover");
+      const h = getObsValue(obs, "humidity") ?? getObsValue(fc, "humidity");
+      const p = getObsValue(obs, "pressure") ?? (hasObs ? null : null);
+      const pr = getObsValue(obs, "precipitation") ?? getObsValue(fc, "precipitation");
+
       document.getElementById("w-temp").textContent = t == null ? "--" : `${t}°`;
       document.getElementById("w-wind").textContent = w == null ? "--" : `${w} m/s`;
+      document.getElementById("w-humidity").textContent = h == null ? "--" : `${h}%`;
+      document.getElementById("w-pressure").textContent = p == null ? "--" : `${p} hPa`;
       document.getElementById("w-vis").textContent = v == null ? "--" : `${(v/1000).toFixed(1)} km`;
-      document.getElementById("w-cloud").textContent = c == null ? "--" : `${c}/8`;
-      document.getElementById("w-station").textContent = station.name || "No weather data loaded";
+      const cloudVal = c == null ? "--" : (typeof c === "number" && c <= 8 ? `${c}/8` : `${c}%`);
+      document.getElementById("w-cloud").textContent = cloudVal;
 
-      // Create or update weather marker
+      let stationLabel = "";
+      const fmtCoord = (v) => (v != null ? v.toFixed(3) : "--");
+      if (pw && hasObs) {
+        stationLabel = `Station: ${fmtCoord(pwQuery.lat)}, ${fmtCoord(pwQuery.lon)}`;
+        if (station.name) stationLabel += ` ${station.name}`;
+      } else if (pw && !hasObs) {
+        stationLabel = `Forecast at ${fmtCoord(pwQuery.lat)}, ${fmtCoord(pwQuery.lon)}`;
+      } else {
+        stationLabel = station.name || "No weather data loaded";
+      }
+      document.getElementById("w-station").textContent = stationLabel;
+
+      // Create or update weather station marker (only for non-point area data)
       if (state.weatherMarker) state.map.removeLayer(state.weatherMarker);
       state.weatherMarker = null;
 
-      if (state.map && station.latitude && station.longitude) {
-        state.weatherMarker = L.circleMarker([station.latitude, station.longitude], {
+      if (!pw && state.map && areaStation.latitude && areaStation.longitude) {
+        state.weatherMarker = L.circleMarker([areaStation.latitude, areaStation.longitude], {
           radius: 10, fillColor: "#c46c32", color: "#fff", weight: 2, fillOpacity: 0.9,
         }).bindPopup(`
-          <b>${station.name}</b><br>Temp: ${t ?? "--"}°C<br>Wind: ${w ?? "--"} m/s<br>Vis: ${v ?? "--"} m
+          <b>${areaStation.name}</b><br>Temp: ${t ?? "--"}°C<br>Wind: ${w ?? "--"} m/s<br>Vis: ${v ?? "--"} m
         `);
-        // Only add to map if the weather overlay toggle is checked
         const cb = document.querySelector('input[data-collection="weather"]');
         if (!cb || cb.checked) state.weatherMarker.addTo(state.map);
       }
@@ -515,6 +593,9 @@
       if (!state.map) initMap();
       document.getElementById("map-area-label").textContent = state.area;
       statusLine.textContent = `Auto-ingesting data for ${state.area}...`;
+      state.pointWeatherData = null;
+      state.weatherPickerActive = false;
+      if (state.pointMarker) { state.map.removeLayer(state.pointMarker); state.pointMarker = null; }
 
       try {
         await fetch("/api/ingest", {

@@ -6,8 +6,11 @@ import httpx
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse, Response
 
+from ipb_backend.agents.celltower import CellTowerAgent
 from ipb_backend.agents.placeholders import SummaryAgent
+from ipb_backend.agents.satellite import SatelliteAgent
 from ipb_backend.config import settings
+from ipb_backend.ingestion.sources.fmi import FmiAdapter
 from ipb_backend.models import (
     AgentDefinition,
     IngestionRequest,
@@ -147,6 +150,15 @@ async def map_data_nls(area: str = Query("North Karelia"), services=Depends(get_
     return {"type": "FeatureCollection", "features": features}
 
 
+@router.get("/weather/point")
+async def weather_point(lat: float = Query(...), lon: float = Query(...), timeframe: str = Query("24h"), services=Depends(get_services)):
+    adapter: FmiAdapter = services["adapters"].get("fmi")
+    if not adapter:
+        return {"error": "FMI adapter not available"}
+    result = await adapter.fetch_point_weather(lat, lon, timeframe)
+    return result
+
+
 @router.get("/ui-demo", response_class=HTMLResponse)
 async def ui_demo():
     return UI_PLACEHOLDER_PATH.read_text(encoding="utf-8")
@@ -160,12 +172,34 @@ async def list_agents():
             name="Summary Agent",
             purpose="Placeholder derived analysis over normalized datasets.",
             status="placeholder",
-        )
+        ),
+        AgentDefinition(
+            agent_id="celltower-agent",
+            name="Cell Tower Agent",
+            purpose="Analyzes cell tower coverage, operators, and technologies from OpenCellID data.",
+            status="active",
+        ),
+        AgentDefinition(
+            agent_id="satellite-agent",
+            name="Satellite Agent",
+            purpose="Tracks reconnaissance and imaging satellite overpass schedules for surveillance windows.",
+            status="active",
+        ),
     ]
 
 
 @router.post("/agents/{agent_id}/run")
-async def run_agent(agent_id: str, area: str, timeframe: str):
-    if agent_id != "summary-agent":
-        return {"error": f"Unknown agent: {agent_id}"}
-    return await SummaryAgent().run(area=area, timeframe=timeframe)
+async def run_agent(agent_id: str, area: str, timeframe: str, services=Depends(get_services)):
+    if agent_id == "summary-agent":
+        return await SummaryAgent().run(area=area, timeframe=timeframe)
+    if agent_id == "celltower-agent":
+        adapter = services["adapters"].get("opencellid")
+        if not adapter:
+            return {"error": "Cell tower adapter not available"}
+        return await CellTowerAgent(adapter).run(area=area, timeframe=timeframe)
+    if agent_id == "satellite-agent":
+        adapter = services["adapters"].get("satellites")
+        if not adapter:
+            return {"error": "Satellite adapter not available"}
+        return await SatelliteAgent(adapter).run(area=area, timeframe=timeframe)
+    return {"error": f"Unknown agent: {agent_id}"}

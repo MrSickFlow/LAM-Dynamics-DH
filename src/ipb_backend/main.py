@@ -12,6 +12,9 @@ from ipb_backend.ingestion.service import IngestionService
 from ipb_backend.ingestion.sources.digiroad import DigiroadAdapter
 from ipb_backend.ingestion.sources.fmi import FmiAdapter
 from ipb_backend.ingestion.sources.nls import NationalLandSurveyAdapter
+from ipb_backend.ingestion.sources.opencellid import OpenCellIdAdapter
+from ipb_backend.ingestion.sources.osm_poi import OsmPoiAdapter
+from ipb_backend.ingestion.sources.satellites import SatelliteTleAdapter
 from ipb_backend.ingestion.sources.statistics_finland import StatisticsFinlandAdapter
 from ipb_backend.models import SourceCategory, SourceDefinition
 
@@ -47,6 +50,27 @@ def build_registry() -> SourceRegistry:
                 description="Road and transport infrastructure datasets.",
                 refresh_interval_seconds=43200,
             ),
+            SourceDefinition(
+                source_id="opencellid",
+                name="OpenCellID",
+                category=SourceCategory.INFRASTRUCTURE,
+                description="Cell tower locations, operators, and technologies.",
+                refresh_interval_seconds=86400,
+            ),
+            SourceDefinition(
+                source_id="osm-poi",
+                name="OpenStreetMap POIs",
+                category=SourceCategory.OTHER,
+                description="Schools, hospitals, water sources, places of worship, government buildings, and other key institutions.",
+                refresh_interval_seconds=86400,
+            ),
+            SourceDefinition(
+                source_id="satellites",
+                name="Satellite TLE Data",
+                category=SourceCategory.SATELLITE,
+                description="TLE orbital data for reconnaissance and imaging satellites.",
+                refresh_interval_seconds=43200,
+            ),
         ]
     )
 
@@ -58,6 +82,9 @@ def build_services():
         "nls": NationalLandSurveyAdapter(registry.get("nls")),
         "statistics-finland": StatisticsFinlandAdapter(registry.get("statistics-finland")),
         "digiroad": DigiroadAdapter(registry.get("digiroad")),
+        "opencellid": OpenCellIdAdapter(registry.get("opencellid")),
+        "osm-poi": OsmPoiAdapter(registry.get("osm-poi")),
+        "satellites": SatelliteTleAdapter(registry.get("satellites")),
     }
     ingestion_service = IngestionService(registry=registry, adapters=adapters)
     scheduler = RefreshScheduler(ingestion_service=ingestion_service)
@@ -65,6 +92,7 @@ def build_services():
         "registry": registry,
         "ingestion_service": ingestion_service,
         "scheduler": scheduler,
+        "adapters": adapters,
     }
 
 

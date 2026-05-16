@@ -13,14 +13,31 @@ from ipb_backend.ingestion.base import SourceAdapter
 from ipb_backend.models import DatasetRecord
 
 
+FORECAST_PARAMETERS = ("Temperature", "Pressure", "Humidity", "TotalCloudCover", "WindSpeedMS", "WindDirection", "Precipitation1h", "Visibility")
+FORECAST_PARAMETER_METADATA = {
+    "Temperature": {"key": "temperature", "label": "Temperature", "unit": "C"},
+    "Pressure": {"key": "pressure", "label": "Pressure", "unit": "hPa"},
+    "Humidity": {"key": "humidity", "label": "Humidity", "unit": "%"},
+    "TotalCloudCover": {"key": "cloud_cover", "label": "Cloud cover", "unit": "%"},
+    "WindSpeedMS": {"key": "wind_speed", "label": "Wind speed", "unit": "m/s"},
+    "WindDirection": {"key": "wind_direction", "label": "Wind direction", "unit": "deg"},
+    "Precipitation1h": {"key": "precipitation", "label": "Precipitation", "unit": "mm/h"},
+    "Visibility": {"key": "visibility", "label": "Visibility", "unit": "m"},
+}
+
+
 class FmiAdapter(SourceAdapter):
     WFS_URL = "https://opendata.fmi.fi/wfs"
-    QUERY_PARAMETERS = ("t2m", "ws_10min", "n_man", "vis")
+    QUERY_PARAMETERS = ("t2m", "ws_10min", "n_man", "vis", "rh", "p_sea", "r_1h", "wg_10min")
     PARAMETER_METADATA = {
         "t2m": {"key": "temperature", "label": "Temperature", "unit": "C"},
         "ws_10min": {"key": "wind_speed", "label": "Wind speed", "unit": "m/s"},
         "n_man": {"key": "cloud_cover", "label": "Cloud cover", "unit": "okta"},
         "vis": {"key": "visibility", "label": "Visibility", "unit": "m"},
+        "rh": {"key": "humidity", "label": "Humidity", "unit": "%"},
+        "p_sea": {"key": "pressure", "label": "Pressure", "unit": "hPa"},
+        "r_1h": {"key": "precipitation", "label": "Precipitation", "unit": "mm/h"},
+        "wg_10min": {"key": "wind_gust", "label": "Wind gust", "unit": "m/s"},
     }
     AREA_PLACE_ALIASES = {
         "archipelago sea": "turku",
@@ -63,6 +80,57 @@ class FmiAdapter(SourceAdapter):
             },
         )
 
+    async def fetch_observations_by_latlon(self, lat: float, lon: float, start_time: datetime, end_time: datetime) -> dict:
+        params = {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "getFeature",
+            "storedquery_id": "fmi::observations::weather::timevaluepair",
+            "latlon": f"{lat},{lon}",
+            "parameters": ",".join(self.QUERY_PARAMETERS),
+            "starttime": start_time.isoformat().replace("+00:00", "Z"),
+            "endtime": end_time.isoformat().replace("+00:00", "Z"),
+            "timestep": 60,
+            "maxlocations": 3,
+        }
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            response = await client.get(self.WFS_URL, params=params)
+            response.raise_for_status()
+        return self._parse_response(response.text)
+
+    async def fetch_forecast_by_latlon(self, lat: float, lon: float) -> dict:
+        now = datetime.now(timezone.utc)
+        start_time = now.replace(minute=0, second=0, microsecond=0)
+        end_time = start_time + timedelta(hours=48)
+        params = {
+            "service": "WFS",
+            "version": "2.0.0",
+            "request": "getFeature",
+            "storedquery_id": "fmi::forecast::harmonie::surface::point::timevaluepair",
+            "latlon": f"{lat},{lon}",
+            "parameters": ",".join(FORECAST_PARAMETERS),
+            "starttime": start_time.isoformat().replace("+00:00", "Z"),
+            "endtime": end_time.isoformat().replace("+00:00", "Z"),
+            "timestep": 60,
+        }
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(self.WFS_URL, params=params)
+            response.raise_for_status()
+        return self._parse_forecast_response(response.text)
+
+    async def fetch_point_weather(self, lat: float, lon: float, timeframe: str = "24h") -> dict:
+        start_time, end_time = self._resolve_time_window(timeframe)
+        observations = await self.fetch_observations_by_latlon(lat, lon, start_time, end_time)
+        try:
+            forecast = await self.fetch_forecast_by_latlon(lat, lon)
+        except Exception:
+            forecast = {"station": {}, "observations": {}}
+        return {
+            "observations": observations,
+            "forecast": forecast,
+            "query": {"lat": lat, "lon": lon, "timeframe": timeframe},
+        }
+
     async def _fetch_xml(self, place: str, start_time: datetime, end_time: datetime) -> str:
         params = {
             "service": "WFS",
@@ -90,6 +158,43 @@ class FmiAdapter(SourceAdapter):
         end_time = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
         start_time = end_time - timedelta(hours=hours)
         return start_time, end_time
+
+    def _parse_forecast_response(self, xml_payload: str) -> dict:
+        root = ET.fromstring(xml_payload)
+        observations: dict[str, dict] = {}
+        position: dict[str, object] = {}
+
+        for member in root.findall("wfs:member", self.NAMESPACES):
+            observation = next(iter(member), None)
+            if observation is None:
+                continue
+
+            parameter_id = self._extract_parameter_id(observation)
+            metadata = FORECAST_PARAMETER_METADATA.get(parameter_id)
+            if metadata is None:
+                continue
+
+            if not position:
+                pos_text = observation.findtext(".//gml:pos", default="", namespaces=self.NAMESPACES)
+                if pos_text:
+                    parts = pos_text.split()
+                    if len(parts) >= 2:
+                        position = {"latitude": self._parse_numeric(parts[0]), "longitude": self._parse_numeric(parts[1])}
+
+            points = self._extract_points(observation)
+            latest = points[-1] if points else {"time": None, "value": None}
+            observations[metadata["key"]] = {
+                "source_parameter": parameter_id,
+                "label": metadata["label"],
+                "unit": metadata["unit"],
+                "latest": latest,
+                "values": points,
+            }
+
+        return {
+            "station": position,
+            "observations": observations,
+        }
 
     def _parse_response(self, xml_payload: str) -> dict:
         root = ET.fromstring(xml_payload)
@@ -173,7 +278,7 @@ class FmiAdapter(SourceAdapter):
     def _build_summary(self, area: str, parsed: dict) -> str:
         station_name = parsed["station"].get("name") or area
         latest_parts = []
-        for key in ("temperature", "wind_speed", "visibility"):
+        for key in ("temperature", "wind_speed", "humidity", "pressure", "precipitation", "wind_gust", "visibility"):
             observation = parsed["observations"].get(key)
             if not observation:
                 continue

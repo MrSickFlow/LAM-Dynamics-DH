@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import unicodedata
 from typing import Any
@@ -62,10 +63,8 @@ class NationalLandSurveyAdapter(SourceAdapter):
         bbox = self._resolve_bbox(area)
         bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
 
-        collection_data: dict[str, dict[str, Any]] = {}
-
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            for coll_id in self.COLLECTION_NAMES:
+            async def fetch_collection(coll_id: str) -> tuple[str, dict[str, Any]]:
                 url = f"{self.BASE_URL}/collections/{coll_id}/items"
                 params: dict[str, str | int] = {
                     "bbox": bbox_str,
@@ -78,17 +77,20 @@ class NationalLandSurveyAdapter(SourceAdapter):
                     data = response.json()
                     features = data.get("features", [])
                     number_matched = data.get("numberMatched", len(features))
-                    collection_data[coll_id] = {
+                    return coll_id, {
                         "label": self.COLLECTIONS[coll_id],
                         "number_matched": number_matched,
                         "number_returned": len(features),
                         "features": features[:100],
                     }
                 except Exception as e:
-                    collection_data[coll_id] = {
+                    return coll_id, {
                         "label": self.COLLECTIONS[coll_id],
                         "error": str(e),
                     }
+
+            results = await asyncio.gather(*[fetch_collection(cid) for cid in self.COLLECTION_NAMES])
+            collection_data = dict(results)
 
         total_features = sum(
             cd.get("number_matched", 0) for cd in collection_data.values()
