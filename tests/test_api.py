@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from ipb_backend.analysis.analyzers import OllamaAnalyzer
 from ipb_backend.ingestion.sources.digiroad import DigiroadAdapter
 from ipb_backend.ingestion.sources.fmi import FmiAdapter
+from ipb_backend.ingestion.sources.nls import NationalLandSurveyAdapter
 from ipb_backend.ingestion.sources.opencellid import OpenCellIdAdapter
 from ipb_backend.ingestion.sources.osm_poi import OsmPoiAdapter
 from ipb_backend.ingestion.sources.satellites import SatelliteTleAdapter
@@ -755,3 +756,130 @@ def test_demographics_agent_run(monkeypatch):
     assert any("Urban/rural split" in f for f in result["findings"])
     assert any("Joensuu" in f for f in result["findings"])
     assert any("Juuka" in f for f in result["findings"])
+
+
+SAMPLE_FOREST_RECORD = DatasetRecord(
+    source_id="osm-poi",
+    category=SourceCategory.OTHER,
+    area="North Karelia",
+    timeframe="72h",
+    summary="OSM POIs for North Karelia",
+    data={
+        "categories": {
+            "forest": [
+                {"tags": {"leaf_type": "needleleaved", "leaf_cycle": "evergreen"}, "lat": 62.8, "lon": 30.2},
+                {"tags": {"leaf_type": "needleleaved", "leaf_cycle": "evergreen"}, "lat": 62.81, "lon": 30.21},
+                {"tags": {"leaf_type": "broadleaved", "leaf_cycle": "deciduous"}, "lat": 62.79, "lon": 30.19},
+                {"tags": {"leaf_type": "mixed", "leaf_cycle": "mixed"}, "lat": 62.78, "lon": 30.18},
+            ],
+        },
+        "total_features": 4,
+    },
+)
+
+
+def test_forest_concealment_agent_run(monkeypatch):
+    async def fake_fetch(self, area, timeframe):
+        return SAMPLE_FOREST_RECORD
+
+    monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
+
+    response = client.post("/api/agents/forest-concealment-agent/run?area=North+Karelia&timeframe=72h")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["agent_id"] == "forest-concealment-agent"
+    assert "4 features" in result["summary"] or "4" in result["findings"][0]
+    assert any("coniferous" in f for f in result["findings"])
+    assert any("high" in f for f in result["findings"])
+
+
+SAMPLE_WEATHER_RECORD = DatasetRecord(
+    source_id="fmi",
+    category=SourceCategory.WEATHER,
+    area="North Karelia",
+    timeframe="72h",
+    summary="FMI weather observations for North Karelia",
+    data={
+        "station": {"name": "Joensuu Linnunlahti", "region": "Joensuu"},
+        "observations": {
+            "temperature": {"latest": {"value": -5.0}},
+            "wind_speed": {"latest": {"value": 12.5}},
+            "wind_gust": {"latest": {"value": 18.0}},
+            "humidity": {"latest": {"value": 85}},
+            "precipitation": {"latest": {"value": 3.2}},
+            "cloud_cover": {"latest": {"value": 90}},
+        },
+    },
+)
+
+
+def test_weather_impact_agent_run(monkeypatch):
+    async def fake_fetch(self, area, timeframe):
+        return SAMPLE_WEATHER_RECORD
+
+    monkeypatch.setattr(FmiAdapter, "fetch", fake_fetch)
+
+    response = client.post("/api/agents/weather-impact-agent/run?area=North+Karelia&timeframe=72h")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["agent_id"] == "weather-impact-agent"
+    assert any("UAV" in f or "drone" in f.lower() for f in result["findings"])
+    assert any("satellite" in f.lower() for f in result["findings"])
+    assert any("Icy" in f or "icy" in f or "ice" in f or "sub-zero" in f or "Sub-zero" in f or "frost" in f for f in result["findings"])
+
+
+SAMPLE_POWER_GRID_RECORD = DatasetRecord(
+    source_id="nls",
+    category=SourceCategory.TERRAIN,
+    area="North Karelia",
+    timeframe="72h",
+    summary="NLS test record with power lines",
+    data={
+        "collections": {
+            "sahkolinja": {
+                "label": "Power lines",
+                "number_matched": 5,
+                "features": [
+                    {"geometry": {"type": "LineString", "coordinates": [[30.0, 62.5, 0], [30.1, 62.55, 0], [30.2, 62.6, 0]]}},
+                    {"geometry": {"type": "LineString", "coordinates": [[30.3, 62.7, 0], [30.4, 62.75, 0]]}},
+                ],
+            }
+        },
+    },
+)
+
+
+def test_power_grid_agent_run(monkeypatch):
+    async def fake_fetch(self, area, timeframe):
+        return SAMPLE_POWER_GRID_RECORD
+
+    monkeypatch.setattr(NationalLandSurveyAdapter, "fetch", fake_fetch)
+
+    response = client.post("/api/agents/power-grid-agent/run?area=North+Karelia&timeframe=72h")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["agent_id"] == "power-grid-agent"
+    assert "2 line segments" in result["summary"] or "2" in result["findings"][0]
+    assert "km" in result["summary"]
+    assert any("chokepoint" in f.lower() for f in result["findings"])
+
+
+def test_forest_concealment_agent_empty(monkeypatch):
+    empty_record = DatasetRecord(
+        source_id="osm-poi",
+        category=SourceCategory.OTHER,
+        area="North Karelia",
+        timeframe="72h",
+        summary="OSM POIs",
+        data={"categories": {"forest": []}, "total_features": 0},
+    )
+
+    async def fake_fetch(self, area, timeframe):
+        return empty_record
+
+    monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
+
+    response = client.post("/api/agents/forest-concealment-agent/run?area=North+Karelia&timeframe=72h")
+    assert response.status_code == 200
+    result = response.json()
+    assert "no forest data" in result["summary"].lower()

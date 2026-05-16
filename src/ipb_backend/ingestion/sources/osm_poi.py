@@ -36,15 +36,21 @@ CATEGORY_QUERIES: dict[str, str] = {
     "emergency_services": 'node["amenity"~"police|fire_station|ambulance_station"]({bbox});way["amenity"~"police|fire_station|ambulance_station"]({bbox});',
     "government": 'node["amenity"~"townhall|courthouse|prison|embassy|community_centre"]({bbox});way["amenity"~"townhall|courthouse|prison|embassy|community_centre"]({bbox});',
     "transport": 'node["amenity"~"bus_station|ferry_terminal|fuel"]({bbox});node["highway"="bus_stop"]({bbox});',
+    "forest": 'way["natural"="wood"]({bbox});way["landuse"="forest"]({bbox});relation["natural"="wood"]({bbox});relation["landuse"="forest"]({bbox});',
 }
 
 
-def _filter_tags(tags: dict[str, str]) -> dict[str, str]:
-    allowed = {"amenity", "name", "religion", "denomination", "school", "healthcare", "operator", "capacity", "drinking_water"}
+FOREST_TAGS = {"leaf_type", "leaf_cycle", "natural", "landuse", "name", "wood"}
+
+def _filter_tags(tags: dict[str, str], category: str = "") -> dict[str, str]:
+    if category == "forest":
+        allowed = FOREST_TAGS
+    else:
+        allowed = {"amenity", "name", "religion", "denomination", "school", "healthcare", "operator", "capacity", "drinking_water"}
     return {k: v for k, v in tags.items() if k in allowed}
 
 
-def _feature_to_poi(el: dict[str, Any]) -> dict[str, Any]:
+def _feature_to_poi(el: dict[str, Any], category: str = "") -> dict[str, Any]:
     tags = el.get("tags", {})
     center = el.get("center") or el
     return {
@@ -53,7 +59,7 @@ def _feature_to_poi(el: dict[str, Any]) -> dict[str, Any]:
         "osm_id": el["id"],
         "lat": center.get("lat"),
         "lon": center.get("lon"),
-        "tags": _filter_tags(tags),
+        "tags": _filter_tags(tags, category),
     }
 
 
@@ -78,7 +84,7 @@ class OsmPoiAdapter(SourceAdapter):
                     resp = await client.post(self.BASE_URL, data={"data": query})
                     resp.raise_for_status()
                     data = resp.json()
-                    pois = [_feature_to_poi(el) for el in data.get("elements", [])]
+                    pois = [_feature_to_poi(el, cat_name) for el in data.get("elements", [])]
                 except Exception as e:
                     pois = [{"error": str(e)}]
 

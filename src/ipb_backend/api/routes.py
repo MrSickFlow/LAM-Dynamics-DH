@@ -10,8 +10,11 @@ from fastapi.responses import HTMLResponse, Response
 from ipb_backend.agents.bridge_load import BridgeLoadAgent
 from ipb_backend.agents.celltower import CellTowerAgent
 from ipb_backend.agents.demographics import DemographicsAgent
+from ipb_backend.agents.forest_concealment import ForestConcealmentAgent
 from ipb_backend.agents.placeholders import SummaryAgent
+from ipb_backend.agents.power_grid import PowerGridAgent
 from ipb_backend.agents.satellite import SatelliteAgent
+from ipb_backend.agents.weather_impact import WeatherImpactAgent
 from ipb_backend.analysis import (
     RulesAnalyzer,
     build_analyzer,
@@ -460,6 +463,24 @@ async def list_agents():
             purpose="Analyzes population, age distribution, sex distribution, and urban/rural classification per municipality.",
             status="active",
         ),
+        AgentDefinition(
+            agent_id="forest-concealment-agent",
+            name="Forest Concealment Agent",
+            purpose="Assesses concealment potential from forest/woodland cover using OSM leaf_type and leaf_cycle data.",
+            status="active",
+        ),
+        AgentDefinition(
+            agent_id="weather-impact-agent",
+            name="Weather Impact Agent",
+            purpose="Analyzes how current weather conditions affect drone ops, surveillance, mobility, and visibility.",
+            status="active",
+        ),
+        AgentDefinition(
+            agent_id="power-grid-agent",
+            name="Power Grid Agent",
+            purpose="Analyzes power line infrastructure density and identifies chokepoints for logistics assessment.",
+            status="active",
+        ),
     ]
 
 
@@ -487,4 +508,19 @@ async def run_agent(agent_id: str, area: str, timeframe: str, services=Depends(g
         if not adapter:
             return {"error": "Statistics Finland adapter not available"}
         return await DemographicsAgent(adapter).run(area=area, timeframe=timeframe)
+    if agent_id == "forest-concealment-agent":
+        adapter = services["adapters"].get("osm-poi")
+        if not adapter:
+            return {"error": "OSM POI adapter not available"}
+        return await ForestConcealmentAgent(adapter).run(area=area, timeframe=timeframe)
+    if agent_id == "weather-impact-agent":
+        adapter = services["adapters"].get("fmi")
+        if not adapter:
+            return {"error": "FMI adapter not available"}
+        return await WeatherImpactAgent(adapter).run(area=area, timeframe=timeframe)
+    if agent_id == "power-grid-agent":
+        adapter = services["adapters"].get("nls")
+        if not adapter:
+            return {"error": "NLS adapter not available"}
+        return await PowerGridAgent(adapter).run(area=area, timeframe=timeframe)
     return {"error": f"Unknown agent: {agent_id}"}
