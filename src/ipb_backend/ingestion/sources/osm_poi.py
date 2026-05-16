@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -8,71 +9,71 @@ from ipb_backend.ingestion.base import SourceAdapter
 from ipb_backend.models import DatasetRecord, LoadTarget
 from ipb_backend.spatial import resolve_load_target_bbox, resolve_load_target_label
 
-# Overpass bbox format: south,west,north,east (i.e. lat_min,lon_min,lat_max,lon_max)
-# spatial.py stores bboxes as (west, south, east, north) so we swap here.
+
 def _overpass_bbox(bbox: tuple[float, float, float, float]) -> str:
+    """Convert (west, south, east, north) to Overpass south,west,north,east."""
     west, south, east, north = bbox
     return f"{south},{west},{north},{east}"
 
 
-# Single combined Overpass query — one request, no parallel rate-limit issues.
-# Each element is categorized on the backend from its tags.
-def _combined_query(bbox: str) -> str:
-    b = bbox
-    return (
-        "[out:json][timeout:60];"
-        "("
-        # Education
-        f'node["amenity"~"^(school|university|college|kindergarten|childcare|library)$"]({b});'
-        f'way["amenity"~"^(school|university|college|kindergarten|childcare|library)$"]({b});'
-        # Healthcare
-        f'node["amenity"~"^(hospital|clinic|doctors|dentist|pharmacy|veterinary)$"]({b});'
-        f'way["amenity"~"^(hospital|clinic|doctors|dentist|pharmacy|veterinary)$"]({b});'
-        # Religion
-        f'node["amenity"="place_of_worship"]({b});'
-        f'way["amenity"="place_of_worship"]({b});'
-        # Emergency services
-        f'node["amenity"~"^(police|fire_station|ambulance_station)$"]({b});'
-        f'way["amenity"~"^(police|fire_station|ambulance_station)$"]({b});'
-        # Government
-        f'node["amenity"~"^(townhall|courthouse|prison|embassy|community_centre)$"]({b});'
-        f'way["amenity"~"^(townhall|courthouse|prison|embassy|community_centre)$"]({b});'
-        # Transport
-        f'node["amenity"~"^(bus_station|ferry_terminal)$"]({b});'
-        f'node["highway"="bus_stop"]({b});'
-        # Water sources
-        f'node["amenity"="drinking_water"]({b});'
-        f'node["man_made"~"^(water_tower|water_well|water_works)$"]({b});'
-        f'node["natural"="spring"]({b});'
-        f'way["man_made"~"^(water_tower|water_well|water_works)$"]({b});'
-        # Forest
-        f'way["natural"="wood"]({b});'
-        f'way["landuse"="forest"]({b});'
-        f'relation["natural"="wood"]({b});'
-        f'relation["landuse"="forest"]({b});'
-        # Industry
-        f'node["landuse"~"^(industrial|commercial|retail)$"]({b});'
-        f'way["landuse"~"^(industrial|commercial|retail)$"]({b});'
-        f'node["building"~"^(industrial|warehouse|factory)$"]({b});'
-        f'way["building"~"^(industrial|warehouse|factory)$"]({b});'
-        # Military
-        f'node["military"]({b});'
-        f'way["military"]({b});'
-        f'node["landuse"="military"]({b});'
-        f'way["landuse"="military"]({b});'
-        # Airfields
-        f'node["aeroway"~"^(aerodrome|airstrip|helipad|heliport)$"]({b});'
-        f'way["aeroway"~"^(aerodrome|airstrip|helipad|heliport)$"]({b});'
-        # Fuel supply
-        f'node["amenity"="fuel"]({b});'
-        f'way["amenity"="fuel"]({b});'
-        f'node["shop"="gas"]({b});'
-        # Power infrastructure
-        f'node["power"~"^(tower|pole|substation|plant|generator)$"]({b});'
-        f'way["power"~"^(line|minor_line|cable|substation)$"]({b});'
-        ");"
-        "out center 5000;"
-    )
+# Four sequential batches — each has its own result cap so categories don't compete.
+# transport alone exceeds 2500 for large Finnish regions; power_infrastructure tops 3000.
+# Keep each high-volume category isolated so smaller categories aren't starved.
+BATCHES: list[dict[str, str]] = [
+    # Batch 1 — civilian services (low volume, all fit comfortably)
+    {
+        "education":        ('node["amenity"~"school|university|college|kindergarten|childcare|library"]({b});'
+                             'way["amenity"~"school|university|college|kindergarten|childcare|library"]({b});'),
+        "healthcare":       ('node["amenity"~"hospital|clinic|doctors|dentist|pharmacy|veterinary"]({b});'
+                             'way["amenity"~"hospital|clinic|doctors|dentist|pharmacy|veterinary"]({b});'),
+        "religion":         ('node["amenity"="place_of_worship"]({b});'
+                             'way["amenity"="place_of_worship"]({b});'),
+        "emergency_services": ('node["amenity"~"police|fire_station|ambulance_station"]({b});'
+                               'way["amenity"~"police|fire_station|ambulance_station"]({b});'),
+        "government":       ('node["amenity"~"townhall|courthouse|prison|embassy|community_centre"]({b});'
+                             'way["amenity"~"townhall|courthouse|prison|embassy|community_centre"]({b});'),
+    },
+    # Batch 2 — transport only (bus_stop alone exceeds 2500 in large regions)
+    {
+        "transport":        ('node["amenity"~"bus_station|ferry_terminal"]({b});'
+                             'node["highway"="bus_stop"]({b});'),
+        "water_sources":    ('node["amenity"="drinking_water"]({b});'
+                             'node["man_made"~"water_tower|water_well|water_works"]({b});'
+                             'node["natural"="spring"]({b});'
+                             'way["man_made"~"water_tower|water_well|water_works"]({b});'),
+    },
+    # Batch 3 — power infrastructure isolated (towers alone hit 3000 for large regions)
+    {
+        "power_infrastructure": ('node["power"~"tower|pole|substation|plant|generator"]({b});'
+                                 'way["power"~"line|minor_line|cable"]({b});'
+                                 'way["power"="substation"]({b});'),
+    },
+    # Batch 4 — operational / military + area features
+    {
+        "military":         ('node["military"]({b});'
+                             'way["military"]({b});'
+                             'node["landuse"="military"]({b});'
+                             'way["landuse"="military"]({b});'),
+        "airfields":        ('node["aeroway"~"aerodrome|airstrip|helipad|heliport"]({b});'
+                             'way["aeroway"~"aerodrome|airstrip|helipad|heliport"]({b});'),
+        "fuel_supply":      ('node["amenity"="fuel"]({b});'
+                             'way["amenity"="fuel"]({b});'
+                             'node["shop"="gas"]({b});'),
+        "forest":           ('way["natural"="wood"]({b});'
+                             'way["landuse"="forest"]({b});'
+                             'relation["natural"="wood"]({b});'
+                             'relation["landuse"="forest"]({b});'),
+        "industry":         ('node["landuse"~"industrial|commercial|retail"]({b});'
+                             'way["landuse"~"industrial|commercial|retail"]({b});'
+                             'node["building"~"industrial|warehouse|factory"]({b});'
+                             'way["building"~"industrial|warehouse|factory"]({b});'),
+    },
+]
+
+
+def _build_query(batch: dict[str, str], b: str, limit: int = 3000) -> str:
+    union = "".join(q.format(b=b) for q in batch.values())
+    return f"[out:json][timeout:55];({union});out center {limit};"
 
 
 def _classify(tags: dict[str, str]) -> str:
@@ -153,38 +154,52 @@ OVERPASS_URLS = [
 
 
 class OsmPoiAdapter(SourceAdapter):
-    REQUEST_TIMEOUT = httpx.Timeout(90.0, connect=10.0)
+    REQUEST_TIMEOUT = httpx.Timeout(65.0, connect=10.0)
+
+    async def _query_batch(self, client: httpx.AsyncClient, query: str) -> list[dict[str, Any]]:
+        last_exc: Exception | None = None
+        for url in OVERPASS_URLS:
+            try:
+                resp = await client.post(url, data={"data": query})
+                resp.raise_for_status()
+                return resp.json().get("elements", [])
+            except Exception as exc:
+                last_exc = exc
+        raise ValueError(f"All Overpass endpoints failed: {last_exc}") from last_exc
 
     async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
         bbox = resolve_load_target_bbox(area, load_target)
         area_label = resolve_load_target_label(area, load_target)
-        overpass_bbox = _overpass_bbox(bbox)
-        query = _combined_query(overpass_bbox)
-
-        last_exc: Exception | None = None
-        async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
-            for url in OVERPASS_URLS:
-                try:
-                    resp = await client.post(url, data={"data": query})
-                    resp.raise_for_status()
-                    elements = resp.json().get("elements", [])
-                    break
-                except Exception as exc:
-                    last_exc = exc
-                    continue
-            else:
-                raise ValueError(f"All Overpass endpoints failed: {last_exc}") from last_exc
+        b = _overpass_bbox(bbox)
 
         categories: dict[str, list[dict[str, Any]]] = {}
-        for el in elements:
-            tags = el.get("tags", {})
-            category = _classify(tags)
-            if category == "other":
-                continue
-            poi = _feature_to_poi(el, category)
-            if poi["lat"] is None or poi["lon"] is None:
-                continue
-            categories.setdefault(category, []).append(poi)
+        batch_errors: list[str] = []
+
+        async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
+            for i, batch in enumerate(BATCHES):
+                query = _build_query(batch, b)
+                try:
+                    elements = await self._query_batch(client, query)
+                except Exception as exc:
+                    batch_errors.append(f"batch{i+1}: {exc}")
+                    continue
+
+                for el in elements:
+                    tags = el.get("tags", {})
+                    category = _classify(tags)
+                    if category == "other":
+                        continue
+                    poi = _feature_to_poi(el, category)
+                    if poi["lat"] is None or poi["lon"] is None:
+                        continue
+                    categories.setdefault(category, []).append(poi)
+
+                # Brief pause between batches to be polite to the server
+                if i < len(BATCHES) - 1:
+                    await asyncio.sleep(1)
+
+        if not categories and batch_errors:
+            raise ValueError(f"OSM POI fetch failed: {'; '.join(batch_errors)}")
 
         total = sum(len(v) for v in categories.values())
         return DatasetRecord(
@@ -198,9 +213,9 @@ class OsmPoiAdapter(SourceAdapter):
                 "provider": "OpenStreetMap contributors (ODbL)",
                 "api": "Overpass API",
                 "license": "ODbL",
-                "query": {"area": area_label, "bbox_overpass": overpass_bbox},
+                "query": {"area": area_label, "bbox_overpass": b},
                 "categories": {k: v for k, v in sorted(categories.items())},
-                "errors": {},
+                "errors": {f"batch{i+1}": e for i, e in enumerate(batch_errors)},
                 "total_features": total,
             },
         )
