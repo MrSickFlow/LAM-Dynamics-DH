@@ -375,19 +375,19 @@ async def ui_placeholder(area: str, timeframe: str):
             UiLayer(
                 layer_id="terrain",
                 title="Terrain and Topography",
-                category="terrain",
+                category=SourceCategory.TERRAIN,
                 description="Elevation, land cover, routes, and water bodies.",
             ),
             UiLayer(
                 layer_id="infrastructure",
                 title="Infrastructure",
-                category="infrastructure",
+                category=SourceCategory.INFRASTRUCTURE,
                 description="Roads, bridges, power, healthcare, and communications.",
             ),
             UiLayer(
                 layer_id="population",
                 title="Population",
-                category="demographics",
+                category=SourceCategory.DEMOGRAPHICS,
                 description="Population density and civic context.",
             ),
         ],
@@ -487,7 +487,7 @@ async def inspect_aoi(request: AoiInspectionRequest, services=Depends(get_servic
     if mask.is_empty:
         raise HTTPException(status_code=400, detail="AOI geometry is empty")
     if mask.geom_type == "MultiPolygon":
-        mask = max(mask.geoms, key=lambda geom: geom.area)
+        mask = max(getattr(mask, "geoms", [mask]), key=lambda geom: geom.area)
     elif mask.geom_type != "Polygon":
         raise HTTPException(status_code=400, detail="AOI geometry must be a Polygon or MultiPolygon")
 
