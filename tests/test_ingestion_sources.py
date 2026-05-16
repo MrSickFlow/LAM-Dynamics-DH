@@ -63,7 +63,7 @@ async def test_nls_fetch_raises_when_all_collections_fail(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_osm_poi_fetch_falls_back_to_demo_when_all_categories_fail(monkeypatch):
+async def test_osm_poi_fetch_falls_back_to_static_when_all_categories_fail(monkeypatch):
     definition = SourceDefinition(
         source_id="osm-poi",
         name="OpenStreetMap POIs",
@@ -76,10 +76,10 @@ async def test_osm_poi_fetch_falls_back_to_demo_when_all_categories_fail(monkeyp
     monkeypatch.setattr("ipb_backend.ingestion.sources.osm_poi.httpx.AsyncClient", lambda *args, **kwargs: FailingAsyncClient())
 
     record = await adapter.fetch("North Karelia", "24h")
-    assert record.data.get("provider", "").startswith("Demo")
+    assert record.data.get("provider", "").startswith("OpenStreetMap")
     categories = record.data.get("categories", {})
-    assert any(len(pois) > 0 for pois in categories.values())
-    assert record.data.get("total_features", 0) > 0
+    total = record.data.get("total_features", 0)
+    assert total > 0
 
 
 @pytest.mark.anyio

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 import unicodedata
 from typing import Any
@@ -42,6 +44,17 @@ CATEGORY_QUERIES: dict[str, str] = {
 
 FOREST_TAGS = {"leaf_type", "leaf_cycle", "natural", "landuse", "name", "wood"}
 
+_AREA_FILE_SUFFIX: dict[str, str] = {
+    "north karelia": "north_karelia",
+    "archipelago sea": "archipelago_sea",
+    "lapland": "lapland",
+    "lapland (kasivarren lappi)": "lapland",
+    "kasivarren lappi": "lapland",
+}
+
+_STATIC_POI_DIR = os.path.join(os.path.dirname(__file__))
+
+
 def _filter_tags(tags: dict[str, str], category: str = "") -> dict[str, str]:
     if category == "forest":
         allowed = FOREST_TAGS
@@ -63,34 +76,41 @@ def _feature_to_poi(el: dict[str, Any], category: str = "") -> dict[str, Any]:
     }
 
 
+_CATEGORY_MAP: dict[str, str] = {
+    "school": "education", "university": "education", "college": "education",
+    "kindergarten": "education", "childcare": "education", "library": "education",
+    "hospital": "healthcare", "clinic": "healthcare", "doctors": "healthcare",
+    "dentist": "healthcare", "pharmacy": "healthcare", "veterinary": "healthcare",
+    "drinking_water": "water_sources", "spring": "water_sources",
+    "water_tower": "water_sources", "water_well": "water_sources", "water_works": "water_sources",
+    "place_of_worship": "religion", "christian": "religion",
+    "police": "emergency_services", "fire_station": "emergency_services",
+    "ambulance_station": "emergency_services",
+    "townhall": "government", "courthouse": "government", "prison": "government",
+    "embassy": "government", "community_centre": "government",
+    "bus_station": "transport", "ferry_terminal": "transport", "fuel": "transport",
+    "bus_stop": "transport",
+    "reservoir": "industry", "storage_tank": "industry",
+    "wood": "forest", "forest": "forest",
+}
+
+
+def _load_static_pois(area: str) -> dict[str, list[dict[str, Any]]]:
+    normalized = area.lower().strip()
+    suffix = _AREA_FILE_SUFFIX.get(normalized, "north_karelia")
+    filepath = os.path.join(_STATIC_POI_DIR, f"static_osm_poi_{suffix}.json")
+    if not os.path.exists(filepath):
+        return {}
+    with open(filepath) as f:
+        return json.load(f)
+
+
 class OsmPoiAdapter(SourceAdapter):
     BASE_URL = "https://overpass-api.de/api/interpreter"
 
     def _resolve_bbox(self, area: str) -> tuple[float, float, float, float]:
         normalized = self._normalize_area(area)
         return AREA_BBOXES.get(normalized, AREA_BBOXES["north karelia"])
-
-    def _build_demo_categories(self, bbox: tuple[float, float, float, float]) -> dict[str, list[dict[str, Any]]]:
-        center_lat = (bbox[0] + bbox[2]) / 2
-        center_lon = (bbox[1] + bbox[3]) / 2
-        import random
-        rng = random.Random(hash(bbox))
-
-        demo_pois: dict[str, list[dict[str, Any]]] = {}
-        for cat_name in CATEGORY_QUERIES:
-            count = rng.randint(3, 8)
-            pois = []
-            for i in range(count):
-                lat = center_lat + rng.uniform(-0.08, 0.08)
-                lon = center_lon + rng.uniform(-0.08, 0.08)
-                pois.append({
-                    "id": f"demo/{cat_name}/{i}",
-                    "type": "node", "osm_id": 9999000 + i,
-                    "lat": round(lat, 5), "lon": round(lon, 5),
-                    "tags": {"name": f"Demo {cat_name} {i}", "amenity": cat_name},
-                })
-            demo_pois[cat_name] = pois
-        return demo_pois
 
     async def fetch(self, area: str, timeframe: str) -> DatasetRecord:
         bbox = self._resolve_bbox(area)
@@ -99,6 +119,7 @@ class OsmPoiAdapter(SourceAdapter):
         categories: dict[str, list[dict[str, Any]]] = {}
         category_errors: dict[str, str] = {}
         total = 0
+        provider = "OpenStreetMap contributors (ODbL)"
 
         async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
             for cat_name, cat_query in CATEGORY_QUERIES.items():
@@ -116,11 +137,21 @@ class OsmPoiAdapter(SourceAdapter):
                 total += len(pois)
 
         if category_errors and len(category_errors) == len(CATEGORY_QUERIES):
-            categories = self._build_demo_categories(bbox)
-            total = sum(len(pois) for pois in categories.values())
-            provider = "Demo data (Overpass API unreachable)"
-        else:
-            provider = "OpenStreetMap contributors (ODbL)"
+            static = _load_static_pois(area)
+            if static:
+                categories = {}
+                total = 0
+                for cat_name in CATEGORY_QUERIES:
+                    items = static.get(cat_name, [])
+                    categories[cat_name] = items
+                    total += len(items)
+                provider = "OpenStreetMap (static extract, Overpass API unreachable)"
+            else:
+                for cat_name in CATEGORY_QUERIES:
+                    if cat_name not in categories:
+                        categories[cat_name] = []
+                provider = "OpenStreetMap contributors (static file not found)"
+
         return DatasetRecord(
             source_id=self.definition.source_id,
             category=self.definition.category,
@@ -129,7 +160,7 @@ class OsmPoiAdapter(SourceAdapter):
             summary=f"OSM POIs for {area}: {total} features across {len(categories)} categories",
             data={
                 "provider": provider,
-                "api": "Overpass API",
+                "api": "Overpass API / static extract",
                 "license": "ODbL",
                 "query": {"area": area, "bbox": bbox_str},
                 "categories": {k: v for k, v in sorted(categories.items())},

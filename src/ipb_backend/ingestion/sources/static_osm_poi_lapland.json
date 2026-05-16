@@ -1,0 +1,2477 @@
+{
+  "education": [
+    {
+      "id": "osmp/239",
+      "type": "way",
+      "osm_id": 0,
+      "lat": 69.01905486363636,
+      "lon": 20.86504541818182,
+      "tags": {
+        "name": "Kilpisjärven koulu",
+        "amenity": "school"
+      }
+    },
+    {
+      "id": "osmp/241",
+      "type": "way",
+      "osm_id": 0,
+      "lat": 69.04366749285714,
+      "lon": 20.80333644642857,
+      "tags": {
+        "amenity": "university"
+      }
+    }
+  ],
+  "healthcare": [],
+  "water_sources": [
+    {
+      "id": "osmp/5",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0167041,
+      "lon": 21.044868,
+      "tags": {
+        "natural": "spring",
+        "drinking_water": "yes"
+      }
+    },
+    {
+      "id": "osmp/6",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0340434,
+      "lon": 21.0804976,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/29",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.687959,
+      "lon": 21.4782278,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/32",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.5926708,
+      "lon": 21.8785638,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/37",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2553176,
+      "lon": 21.281243,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/38",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2397737,
+      "lon": 21.2850196,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/39",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.235514,
+      "lon": 21.2891824,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/40",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.047057,
+      "lon": 20.8041459,
+      "tags": {
+        "man_made": "water_well"
+      }
+    },
+    {
+      "id": "osmp/46",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0001713,
+      "lon": 20.9034801,
+      "tags": {
+        "man_made": "water_well"
+      }
+    },
+    {
+      "id": "osmp/47",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0006769,
+      "lon": 20.9056045,
+      "tags": {
+        "man_made": "water_well"
+      }
+    },
+    {
+      "id": "osmp/51",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0362823,
+      "lon": 20.8662176,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/52",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0334378,
+      "lon": 21.2254821,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/53",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.269709,
+      "lon": 21.5105855,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/54",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2688223,
+      "lon": 21.509957,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/55",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1238674,
+      "lon": 21.2385856,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/56",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2166718,
+      "lon": 21.0934781,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/57",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2154968,
+      "lon": 21.0870404,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/58",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.77454,
+      "lon": 21.9983567,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/59",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7623361,
+      "lon": 21.568624,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/60",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8964112,
+      "lon": 21.4556902,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/61",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7976203,
+      "lon": 21.6298893,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/62",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7777856,
+      "lon": 22.1736735,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/63",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7544716,
+      "lon": 22.1945342,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/64",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7529644,
+      "lon": 22.0944758,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/65",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7532221,
+      "lon": 22.0960758,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/66",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0588648,
+      "lon": 20.6826725,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/67",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7821965,
+      "lon": 22.1737596,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/68",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7139533,
+      "lon": 22.3472853,
+      "tags": {
+        "natural": "spring",
+        "drinking_water": "yes"
+      }
+    },
+    {
+      "id": "osmp/69",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0715892,
+      "lon": 21.7695162,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/70",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0705755,
+      "lon": 21.7676167,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/71",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0720652,
+      "lon": 20.6152177,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/72",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0722645,
+      "lon": 20.614016,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/73",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0726324,
+      "lon": 20.6118272,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/74",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0708848,
+      "lon": 20.6179644,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/75",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.070538,
+      "lon": 20.6191775,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/76",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0795763,
+      "lon": 20.6066766,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/77",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9256358,
+      "lon": 21.0554277,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/78",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9255858,
+      "lon": 21.0559431,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/79",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8992108,
+      "lon": 21.399275,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/80",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8876782,
+      "lon": 21.4403195,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/81",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8851076,
+      "lon": 21.4223539,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/82",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9009716,
+      "lon": 21.5580115,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/83",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9896701,
+      "lon": 21.1793419,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/84",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.979132,
+      "lon": 21.2160562,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/85",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9595125,
+      "lon": 21.1262761,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/86",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9256348,
+      "lon": 21.1743613,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/87",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.017753,
+      "lon": 21.1660727,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/88",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9643973,
+      "lon": 21.061788,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/89",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9657957,
+      "lon": 21.0727183,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/90",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9717532,
+      "lon": 21.0659045,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/91",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0627925,
+      "lon": 20.8181258,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/92",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0630324,
+      "lon": 20.817963,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/93",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0633193,
+      "lon": 20.8177623,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/94",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0631915,
+      "lon": 20.8177121,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/95",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0273815,
+      "lon": 20.9244226,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/96",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1907368,
+      "lon": 21.2694794,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/97",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1936376,
+      "lon": 21.263057,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/98",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1372292,
+      "lon": 21.3408496,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/99",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1466893,
+      "lon": 21.345975,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/100",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1462163,
+      "lon": 21.3451639,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/101",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1471902,
+      "lon": 21.3484798,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/102",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.153673,
+      "lon": 21.3306402,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/103",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1603489,
+      "lon": 21.2821597,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/104",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2013836,
+      "lon": 21.4478651,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/105",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2043327,
+      "lon": 21.4374611,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/106",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1998985,
+      "lon": 21.4477291,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/107",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1993758,
+      "lon": 21.4458351,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/108",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1994634,
+      "lon": 21.4488443,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/109",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2095271,
+      "lon": 21.5597968,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/110",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.209581,
+      "lon": 21.56016,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/111",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9150655,
+      "lon": 21.851343,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/112",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7644554,
+      "lon": 21.3371211,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/113",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2066003,
+      "lon": 21.017048,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/114",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2088412,
+      "lon": 21.0283624,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/115",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0107842,
+      "lon": 21.3807208,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/116",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0034858,
+      "lon": 21.5999327,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/117",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1419719,
+      "lon": 21.393101,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/118",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1673746,
+      "lon": 21.711958,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/119",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0251917,
+      "lon": 21.9235116,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/120",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9643969,
+      "lon": 21.7994145,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/121",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0850803,
+      "lon": 21.3288945,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/122",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0846688,
+      "lon": 21.3254738,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/123",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0801365,
+      "lon": 21.3025751,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/124",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1191059,
+      "lon": 21.2776253,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/125",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1247818,
+      "lon": 21.2402613,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/126",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1071544,
+      "lon": 21.2449594,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/127",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1071733,
+      "lon": 21.2451769,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/128",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1062939,
+      "lon": 21.2400554,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/129",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1061691,
+      "lon": 21.2393729,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/130",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1068993,
+      "lon": 21.24183,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/131",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1069145,
+      "lon": 21.2425722,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/132",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1225375,
+      "lon": 21.2400808,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/133",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1341828,
+      "lon": 21.2566011,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/134",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1206735,
+      "lon": 21.2972752,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/135",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1206306,
+      "lon": 21.2966121,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/136",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1296377,
+      "lon": 21.321228,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/137",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1369839,
+      "lon": 21.3418138,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/138",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1369389,
+      "lon": 21.3422929,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/139",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1370171,
+      "lon": 21.3433309,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/140",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1341647,
+      "lon": 21.3514736,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/141",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1460898,
+      "lon": 21.3454653,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/142",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1262052,
+      "lon": 21.3244845,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/143",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0812324,
+      "lon": 21.6472019,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/144",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1495386,
+      "lon": 21.8228738,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/145",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1473341,
+      "lon": 21.735979,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/146",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1477799,
+      "lon": 21.7348999,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/147",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1639769,
+      "lon": 21.2434779,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/148",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1649757,
+      "lon": 21.2360132,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/149",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1653611,
+      "lon": 21.2405461,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/150",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1684965,
+      "lon": 21.2290646,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/151",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1606282,
+      "lon": 21.2523935,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/152",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2085178,
+      "lon": 21.2581253,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/153",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2167379,
+      "lon": 21.1033841,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/154",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2165385,
+      "lon": 21.0906536,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/155",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2165674,
+      "lon": 21.0903738,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/156",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2165364,
+      "lon": 21.0899249,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/157",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2165592,
+      "lon": 21.0901639,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/158",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2165141,
+      "lon": 21.086682,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/159",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2162043,
+      "lon": 21.0876291,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/160",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2156027,
+      "lon": 21.086524,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/161",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2157636,
+      "lon": 21.0854126,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/162",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2158079,
+      "lon": 21.0860647,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/163",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2165515,
+      "lon": 21.0758675,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/164",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2155984,
+      "lon": 21.0749352,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/165",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2106356,
+      "lon": 21.0804969,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/166",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2271578,
+      "lon": 21.1127398,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/167",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.216912,
+      "lon": 21.1363584,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/168",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2169294,
+      "lon": 21.1357214,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/169",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2146996,
+      "lon": 21.1593218,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/170",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2148131,
+      "lon": 21.158906,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/171",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.209759,
+      "lon": 21.145525,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/172",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.220892,
+      "lon": 21.2637024,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/173",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2285588,
+      "lon": 21.2614209,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/174",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2375872,
+      "lon": 21.2349434,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/175",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2374099,
+      "lon": 21.2387785,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/176",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2376488,
+      "lon": 21.2372465,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/177",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2376292,
+      "lon": 21.2423144,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/178",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2336612,
+      "lon": 21.2153561,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/179",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2479264,
+      "lon": 21.1998546,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/180",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2584545,
+      "lon": 21.2052067,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/181",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2566068,
+      "lon": 21.2084979,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/182",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2567266,
+      "lon": 21.2092671,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/183",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2670921,
+      "lon": 21.2147045,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/184",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2607757,
+      "lon": 21.284681,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/185",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2631825,
+      "lon": 21.2699151,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/186",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2715095,
+      "lon": 21.2994922,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/187",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2277455,
+      "lon": 21.299127,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/188",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.227686,
+      "lon": 21.2991094,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/189",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2289434,
+      "lon": 21.2982535,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/190",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2279032,
+      "lon": 21.3099295,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/191",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.227563,
+      "lon": 21.3108313,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/192",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1970271,
+      "lon": 21.3509641,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/193",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1966673,
+      "lon": 21.3548501,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/194",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2079593,
+      "lon": 21.3627113,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/195",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1812929,
+      "lon": 21.5714159,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/196",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2579151,
+      "lon": 21.5300188,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/197",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2349783,
+      "lon": 21.4183623,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/198",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2349528,
+      "lon": 21.4184886,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/199",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2179595,
+      "lon": 21.4616043,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/200",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1172411,
+      "lon": 21.1408162,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/201",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1165741,
+      "lon": 21.1430804,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/202",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1170536,
+      "lon": 21.1427075,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/203",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0955629,
+      "lon": 21.1401106,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/204",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.5789099,
+      "lon": 22.1919251,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/205",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6140741,
+      "lon": 22.0571068,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/206",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9467689,
+      "lon": 21.5589182,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/207",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9386808,
+      "lon": 21.4109865,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/208",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9362239,
+      "lon": 21.4422599,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/209",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9718716,
+      "lon": 21.3548427,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/210",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9983215,
+      "lon": 21.2695907,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/211",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9971928,
+      "lon": 21.2702062,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/212",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9500307,
+      "lon": 21.3261985,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/213",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9498272,
+      "lon": 21.324013,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/214",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9059307,
+      "lon": 21.2676909,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/215",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.9200004,
+      "lon": 22.046937,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/216",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8555023,
+      "lon": 21.4141732,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/217",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6637306,
+      "lon": 21.870891,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/218",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6637435,
+      "lon": 21.871122,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/219",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6275244,
+      "lon": 21.7710217,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/220",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7636273,
+      "lon": 21.5948283,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/221",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7943807,
+      "lon": 21.585395,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/222",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0122892,
+      "lon": 21.0330621,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/223",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0123692,
+      "lon": 21.0309887,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/224",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8269253,
+      "lon": 21.3174884,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/225",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7551289,
+      "lon": 22.3154338,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/226",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7556204,
+      "lon": 22.3185243,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/228",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7326415,
+      "lon": 21.6341917,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/229",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8230247,
+      "lon": 21.8358503,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/230",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7349401,
+      "lon": 22.4862581,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/231",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7227158,
+      "lon": 22.4230795,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/232",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.730637,
+      "lon": 22.3673666,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/233",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7624645,
+      "lon": 22.3505024,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/234",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7642723,
+      "lon": 22.3553821,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/235",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7646753,
+      "lon": 22.3571146,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/236",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7161104,
+      "lon": 22.3486686,
+      "tags": {
+        "natural": "spring",
+        "drinking_water": "yes"
+      }
+    },
+    {
+      "id": "osmp/237",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6910968,
+      "lon": 22.3497323,
+      "tags": {
+        "natural": "spring"
+      }
+    },
+    {
+      "id": "osmp/238",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.2734704,
+      "lon": 21.5010298,
+      "tags": {
+        "natural": "spring"
+      }
+    }
+  ],
+  "religion": [],
+  "emergency_services": [
+    {
+      "id": "osmp/240",
+      "type": "way",
+      "osm_id": 0,
+      "lat": 69.04610677142857,
+      "lon": 20.802340000000004,
+      "tags": {
+        "operator": "Enontekiön VPK",
+        "name": "Kilpisjärven paloasema",
+        "amenity": "fire_station"
+      }
+    }
+  ],
+  "government": [],
+  "transport": [
+    {
+      "id": "osmp/0",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0161758,
+      "lon": 20.875985,
+      "tags": {
+        "highway": "bus_stop"
+      }
+    },
+    {
+      "id": "osmp/1",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0472537,
+      "lon": 20.7939348,
+      "tags": {
+        "name": "Kilpisjärvi - Koltalukta",
+        "amenity": "ferry_terminal"
+      }
+    },
+    {
+      "id": "osmp/2",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0170241,
+      "lon": 20.8748484,
+      "tags": {
+        "name": "Neste Enontekiö Kilpisjärvi",
+        "amenity": "fuel"
+      }
+    },
+    {
+      "id": "osmp/3",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0467018,
+      "lon": 20.7991362,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Kilpisjärven retkeilykeskus E"
+      }
+    },
+    {
+      "id": "osmp/4",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0477484,
+      "lon": 20.7981972,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Kilpisjärvi retkeilykeskus piha"
+      }
+    },
+    {
+      "id": "osmp/7",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.048312,
+      "lon": 20.7962339,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Kilpisjärven retkeilykeskus P"
+      }
+    },
+    {
+      "id": "osmp/8",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0443126,
+      "lon": 20.8044786,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Biologinen tutkimusasema E"
+      }
+    },
+    {
+      "id": "osmp/9",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0439155,
+      "lon": 20.8059699,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Biologinen tutkimusasema P"
+      }
+    },
+    {
+      "id": "osmp/10",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0186349,
+      "lon": 20.8682776,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Kilpisjärven koulu E"
+      }
+    },
+    {
+      "id": "osmp/11",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.019434,
+      "lon": 20.8664859,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Kilpisjärven koulu P"
+      }
+    },
+    {
+      "id": "osmp/12",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0161357,
+      "lon": 20.8758576,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Kilpisjärven hotelli E"
+      }
+    },
+    {
+      "id": "osmp/13",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0168657,
+      "lon": 20.8741655,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Kilpisjärven hotelli P"
+      }
+    },
+    {
+      "id": "osmp/14",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0127498,
+      "lon": 20.8864783,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Kilpisjärven luontotalo P"
+      }
+    },
+    {
+      "id": "osmp/15",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0133261,
+      "lon": 20.8840536,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Kilpisjärven luontotalo E"
+      }
+    },
+    {
+      "id": "osmp/16",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.046659,
+      "lon": 20.6093992,
+      "tags": {
+        "amenity": "ferry_terminal"
+      }
+    },
+    {
+      "id": "osmp/17",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0164858,
+      "lon": 20.8704667,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Hotelli Kilpis"
+      }
+    },
+    {
+      "id": "osmp/18",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8855751,
+      "lon": 21.0484974,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Peera"
+      }
+    },
+    {
+      "id": "osmp/19",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8558555,
+      "lon": 21.1271778,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Pousu E"
+      }
+    },
+    {
+      "id": "osmp/20",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8561909,
+      "lon": 21.1269137,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Pousu P"
+      }
+    },
+    {
+      "id": "osmp/21",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8485127,
+      "lon": 21.1506563,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Pousujärvi P"
+      }
+    },
+    {
+      "id": "osmp/22",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.8484332,
+      "lon": 21.1503655,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Pousujärvi E"
+      }
+    },
+    {
+      "id": "osmp/23",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7320662,
+      "lon": 21.4182642,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Iitto P"
+      }
+    },
+    {
+      "id": "osmp/24",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.7324315,
+      "lon": 21.4174455,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Iitto E"
+      }
+    },
+    {
+      "id": "osmp/25",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6754158,
+      "lon": 21.5955152,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Ropinsalmi I"
+      }
+    },
+    {
+      "id": "osmp/26",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6748783,
+      "lon": 21.6014478,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Ropinsalmi L"
+      }
+    },
+    {
+      "id": "osmp/27",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6844187,
+      "lon": 21.4771669,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Käsivarrentie 9355 E"
+      }
+    },
+    {
+      "id": "osmp/28",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6845161,
+      "lon": 21.4774221,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Käsivarrentie 9356 P"
+      }
+    },
+    {
+      "id": "osmp/30",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6267962,
+      "lon": 21.7166558,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Pättikkä P"
+      }
+    },
+    {
+      "id": "osmp/31",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6264881,
+      "lon": 21.7161989,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Pättikkä E"
+      }
+    },
+    {
+      "id": "osmp/33",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.5550999,
+      "lon": 21.9823616,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Käsivarrentie 6555 E"
+      }
+    },
+    {
+      "id": "osmp/34",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.5198533,
+      "lon": 22.0228712,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Käsivarrentie 6105 E"
+      }
+    },
+    {
+      "id": "osmp/35",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.5204471,
+      "lon": 22.0231761,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Järämä P"
+      }
+    },
+    {
+      "id": "osmp/36",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.5558493,
+      "lon": 21.9811513,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Käsivarrentie 6564 P"
+      }
+    },
+    {
+      "id": "osmp/41",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1112863,
+      "lon": 20.7496191,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Valtakunnanraja"
+      }
+    },
+    {
+      "id": "osmp/42",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.1097898,
+      "lon": 20.751021,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Valtakunnanraja"
+      }
+    },
+    {
+      "id": "osmp/43",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0571563,
+      "lon": 20.7808648,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Käsivarrentie 14802 P"
+      }
+    },
+    {
+      "id": "osmp/44",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0562423,
+      "lon": 20.7818962,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Käsivarrentie 14791 E"
+      }
+    },
+    {
+      "id": "osmp/45",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0495121,
+      "lon": 20.7931595,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Kilpisjärven retkeilualue E"
+      }
+    },
+    {
+      "id": "osmp/48",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0168316,
+      "lon": 20.8740392,
+      "tags": {
+        "highway": "bus_stop"
+      }
+    },
+    {
+      "id": "osmp/49",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0193855,
+      "lon": 20.8663418,
+      "tags": {
+        "highway": "bus_stop"
+      }
+    },
+    {
+      "id": "osmp/50",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 69.0187141,
+      "lon": 20.8683369,
+      "tags": {
+        "highway": "bus_stop"
+      }
+    },
+    {
+      "id": "osmp/227",
+      "type": "node",
+      "osm_id": 0,
+      "lat": 68.6747111,
+      "lon": 21.601522,
+      "tags": {
+        "highway": "bus_stop",
+        "name": "Ropinsalmi I"
+      }
+    }
+  ],
+  "industry": []
+}
