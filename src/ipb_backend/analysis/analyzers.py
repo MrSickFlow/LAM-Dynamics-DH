@@ -338,8 +338,28 @@ def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, An
     osm = raw_data.get("osm-poi", {})
     if osm.get("feature_count"):
         poi_cols = osm.get("collections", [])
-        poi_types = ", ".join(f"{c.get('label', c.get('collection', ''))}" for c in poi_cols[:5])
-        lines.append(f"POINTS OF INTEREST: {osm['feature_count']} POIs ({poi_types})")
+        col_counts = {c.get("collection", ""): c.get("count", 0) for c in poi_cols}
+        lines.append(f"POINTS OF INTEREST: {osm['feature_count']} features across {len(poi_cols)} categories")
+
+        # High-value categories with counts
+        hv = ["military", "airfields", "power_infrastructure", "logistics", "ports_terminals",
+              "fuel_supply", "healthcare", "emergency_services", "government", "industry"]
+        for cat in hv:
+            if col_counts.get(cat):
+                lines.append(f"  - {cat.replace('_', ' ').title()}: {col_counts[cat]}")
+
+        # Extract named features for tactically significant categories
+        features_list = osm.get("features", [])
+        named_by_cat: dict[str, list[str]] = {}
+        for feat in features_list:
+            props = feat.get("properties", {})
+            cat = props.get("_collection", "")
+            name = props.get("name", "")
+            if cat in ("military", "airfields", "logistics", "ports_terminals", "power_infrastructure") and name:
+                named_by_cat.setdefault(cat, []).append(name)
+        for cat, names in named_by_cat.items():
+            unique = list(dict.fromkeys(names))[:5]
+            lines.append(f"  Named {cat}: {'; '.join(unique)}")
 
     # Derived indicators from package
     for ind in data_package.get("derived_indicators", []):
@@ -416,12 +436,15 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
         profile_focus = PROFILE_SPECS.get(profile_value, PROFILE_SPECS[AnalysisProfile.GENERAL])["focus"]
 
         system_prompt = (
-            "You are an IPB (Intelligence Preparation of the Battlefield) analyst specializing in Finnish terrain. "
-            "You analyze open-source data from NLS topography, Digiroad road network, FMI weather, "
-            "Statistics Finland, OpenCellID, and OpenStreetMap to produce actionable military assessments. "
-            "Use the OAKOC framework (Observation & fields of fire, Avenues of approach, Key terrain, "
-            "Obstacles, Cover & concealment). Be specific and reference the actual data. "
-            "Never invent data not present in the package. Flag data gaps explicitly."
+            "You are a senior intelligence analyst specializing in Finnish military geography and operational terrain assessment. "
+            "You draw on open-source data — NLS topography, Digiroad road network, FMI weather, Statistics Finland, "
+            "OpenCellID, and OpenStreetMap — to produce intelligence estimates that read like a real intelligence product. "
+            "Your job is to synthesize across data sources and reveal what the area means operationally — not to list "
+            "what each data source contains. Connect the dots. Surface non-obvious implications. "
+            "A forested lake district means something different from open agricultural terrain bisected by roads. "
+            "A military installation near a power substation and a fuel depot is a different picture than any of those alone. "
+            "Use the OAKOC framework as an analytical lens, not a checklist. "
+            "Never invent data not in the package. Flag genuine gaps explicitly."
         )
 
         context_message = (
@@ -429,10 +452,15 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
             + (f" | Bounds: {', '.join(f'{b:.3f}' for b in bounds)}" if bounds else "")
             + f"\nAnalysis profile: {profile_value.value} — {profile_focus}\n\n"
             + data_text
-            + "\n\nProvide a military assessment. "
-            "Return JSON with keys: summary (2-3 sentence tactical assessment), "
-            "findings (array of 5-8 specific military-relevant findings), "
-            "limitations (array of data gaps or caveats)."
+            + "\n\nProduce an intelligence assessment of this area. "
+            "Return JSON with three keys:\n"
+            "- summary: A flowing 3-5 sentence narrative that characterizes the area's operational profile. "
+            "Do not list data sources — synthesize them into a picture of what this area is and what it means. "
+            "What is the dominant terrain character? What does the infrastructure tell you? What are the key tensions or opportunities?\n"
+            "- findings: Array of 7-10 analytical insights. Each should be a complete sentence or two that draws an operationally "
+            "relevant conclusion — ideally connecting two or more data points. Avoid restating raw counts. "
+            "Prefer insights like 'The concentration of X near Y suggests...' over 'There are N features of type Z.'\n"
+            "- limitations: Array of genuine data gaps that affect the assessment."
         )
 
         # Build message list — prepend context on first turn, use history for follow-ups
@@ -448,11 +476,17 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
         else:
             # Follow-up conversation — seed with context then replay history
             messages.append({"role": "user", "content": context_message})
+            # Use the actual prior summary as the assistant seed so conversation is grounded
+            prior_summary = ""
+            for turn in history:
+                if turn.get("role") == "assistant" and turn.get("content"):
+                    prior_summary = turn["content"]
+                    break
             messages.append({
                 "role": "assistant",
-                "content": json.dumps({"summary": "AOI data loaded.", "findings": [], "limitations": []})
+                "content": prior_summary or json.dumps({"summary": "AOI data loaded.", "findings": [], "limitations": []})
             })
-            for turn in history[1:]:  # skip the first assistant turn (the initial summary)
+            for turn in history[1:]:
                 role = turn.get("role", "user")
                 content = turn.get("content", "")
                 if content:
@@ -508,7 +542,7 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
                 },
                 json={
                     "model": settings.anthropic_model,
-                    "max_tokens": 1200,
+                    "max_tokens": 2000,
                     "system": system,
                     "messages": messages,
                 },
