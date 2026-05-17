@@ -2738,9 +2738,9 @@
         setLayerAvailability(["satellite-tracks"], true);
         const layer = state.collectionLayers["satellite-tracks"];
         if (!layer) return;
-        const bbox = state.loadTarget?.kind === "bbox" ? state.loadTarget.bbox_wgs84 : null;
         layer.clearLayers();
-        layer.addData(_clipTracksToBbox(geojson, bbox));
+        // Backend already filtered to passes that intersect the bbox — render full arcs
+        layer.addData(geojson);
         const checkbox = document.querySelector('input[data-collection="satellite-tracks"]');
         if (!checkbox || checkbox.checked) layer.addTo(state.map);
       } catch (error) {
