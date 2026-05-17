@@ -1321,15 +1321,14 @@ def test_point_inspect_terrain_schema():
     assert isinstance(terrain["available"], bool)
 
 
-def test_point_inspect_los_is_stub():
+def test_point_inspect_los_has_available_field():
     response = client.post(
         "/api/point/inspect",
         json={"lat": 62.6, "lon": 29.8},
     )
     assert response.status_code == 200
     los = response.json()["los"]
-    assert los["available"] is False
-    assert "note" in los
+    assert isinstance(los.get("available"), bool)
 
 
 def test_point_inspect_nearby_context_schema():
@@ -1354,7 +1353,7 @@ def test_unavailable_elevation_provider_returns_none():
     assert result is None
 
 
-def test_build_elevation_provider_without_key_is_unavailable():
-    from ipb_backend.terrain.elevation import build_elevation_provider, UnavailableElevationProvider
+def test_build_elevation_provider_returns_open_topo():
+    from ipb_backend.terrain.elevation import build_elevation_provider, OpenTopoElevationProvider
     provider = build_elevation_provider("")
-    assert isinstance(provider, UnavailableElevationProvider)
+    assert isinstance(provider, OpenTopoElevationProvider)

@@ -1160,6 +1160,7 @@
           </div>
           <div class="control-row">
             <button class="btn btn-secondary" id="draw-load-area-btn" type="button">Draw Load Rectangle</button>
+            <button class="btn btn-secondary" id="point-inspector-btn" type="button">Point Inspector</button>
           </div>
           <p class="panel-copy" id="load-target-label">Current load area: North Karelia (named area)</p>
           <div class="control-row">
@@ -1422,6 +1423,7 @@
     const usePresetBtn = document.getElementById("use-preset-btn");
     const useViewBtn = document.getElementById("use-view-btn");
     const drawLoadAreaBtn = document.getElementById("draw-load-area-btn");
+    const pointInspectorBtn = document.getElementById("point-inspector-btn");
     const loadTargetLabel = document.getElementById("load-target-label");
     const refreshBtn = document.getElementById("refresh-btn");
     const clearSelectionBtn = document.getElementById("clear-selection-btn");
@@ -2080,24 +2082,6 @@
           el.querySelector("input").addEventListener("change", toggleOverlay);
           body.appendChild(el);
 
-          const pickerEl = document.createElement("label");
-          pickerEl.className = "overlay-item";
-          pickerEl.style.marginTop = "4px";
-          pickerEl.innerHTML = `
-            <input type="checkbox" data-action="weather-picker" />
-            <span class="overlay-swatch" style="background:#195d85"></span>
-            <span>Point Inspector <span style="font-weight:400;color:var(--muted)">(click map)</span></span>
-          `;
-          pickerEl.querySelector("input").addEventListener("change", (e) => {
-            state.weatherPickerActive = e.target.checked;
-            state.pointInspectorActive = e.target.checked;
-            if (!state.pointInspectorActive && state.pointMarker) {
-              state.map.removeLayer(state.pointMarker);
-              state.pointMarker = null;
-            }
-            state.map.getContainer().style.cursor = state.pointInspectorActive ? "crosshair" : "";
-          });
-          body.appendChild(pickerEl);
         }
 
         category.ids.forEach((id) => {
@@ -3133,14 +3117,13 @@
       if (state.pointMarker) { state.map.removeLayer(state.pointMarker); state.pointMarker = null; }
       const pointSnapshotSection = document.getElementById("point-snapshot-section");
       if (pointSnapshotSection) pointSnapshotSection.style.display = "none";
+      if (pointInspectorBtn) { pointInspectorBtn.textContent = "Point Inspector"; pointInspectorBtn.style.background = ""; pointInspectorBtn.style.color = ""; }
       state.timeframe = timeframeInput.value.trim() || "72h";
 
       refreshBtn.disabled = true;
       refreshBtn.textContent = "Loading...";
       statusLine.classList.add("is-loading");
       statusLine.innerHTML = '<span class="status-spinner"></span>Fetching datasets — this takes 20–30 s on first load…';
-      const weatherPickerToggle = document.querySelector('input[data-action="weather-picker"]');
-      if (weatherPickerToggle) weatherPickerToggle.checked = false;
       state.map.getContainer().style.cursor = "";
 
       try {
@@ -3442,6 +3425,22 @@
 
     refreshBtn.addEventListener("click", bootstrapWorkspace);
     clearSelectionBtn.addEventListener("click", clearSelection);
+
+    pointInspectorBtn.addEventListener("click", () => {
+      state.pointInspectorActive = !state.pointInspectorActive;
+      state.weatherPickerActive = state.pointInspectorActive;
+      pointInspectorBtn.textContent = state.pointInspectorActive ? "Cancel Inspector" : "Point Inspector";
+      pointInspectorBtn.style.background = state.pointInspectorActive ? "var(--accent-3)" : "";
+      pointInspectorBtn.style.color = state.pointInspectorActive ? "#fff" : "";
+      if (!state.pointInspectorActive && state.pointMarker) {
+        state.map.removeLayer(state.pointMarker);
+        state.pointMarker = null;
+      }
+      state.map.getContainer().style.cursor = state.pointInspectorActive ? "crosshair" : "";
+      if (state.pointInspectorActive) {
+        statusLine.textContent = "Point Inspector active — click anywhere on the map.";
+      }
+    });
 
     /* ===== Mission Planning ===== */
     const VEHICLE_PRESETS = {

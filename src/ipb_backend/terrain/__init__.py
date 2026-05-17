@@ -1,6 +1,6 @@
 from ipb_backend.terrain.elevation import (
     ElevationProvider,
-    NlsElevationProvider,
+    OpenTopoElevationProvider,
     UnavailableElevationProvider,
     build_elevation_provider,
     compute_radial_los,
@@ -8,7 +8,7 @@ from ipb_backend.terrain.elevation import (
 
 __all__ = [
     "ElevationProvider",
-    "NlsElevationProvider",
+    "OpenTopoElevationProvider",
     "UnavailableElevationProvider",
     "build_elevation_provider",
     "compute_radial_los",
