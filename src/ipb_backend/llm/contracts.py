@@ -75,6 +75,7 @@ class LlmWrapperInput(BaseModel):
     profile: AnalysisProfile = AnalysisProfile.GENERAL
     profile_focus: str
     question: str | None = None
+    schematic_brief: str = ""
     selection: LlmSelectionDigest
     counts: dict[str, Any] = Field(default_factory=dict)
     source_digests: list[LlmSourceDigest] = Field(default_factory=list)

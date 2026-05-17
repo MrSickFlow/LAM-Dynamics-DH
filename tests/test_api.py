@@ -556,6 +556,7 @@ def test_aoi_inspection_returns_clipped_source_data():
     assert payload["agent"]["evidence_bundle"]
     assert payload["data_package"]["selection"]["selection_type"] == "geometry"
     assert payload["llm_input"]["profile_focus"]
+    assert payload["llm_input"]["schematic_brief"]
     assert payload["llm_input"]["source_digests"]
     assert payload["data_package"]["quality"]["overall_confidence"] in {"high", "low", "medium"}
     assert payload["llm_output"]["profile"] == "general"

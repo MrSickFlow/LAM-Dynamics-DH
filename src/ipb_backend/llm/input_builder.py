@@ -16,6 +16,123 @@ from ipb_backend.llm.contracts import (
 from ipb_backend.llm.profiles import PROFILE_SPECS
 
 
+def _format_brief_scalar(value: Any) -> str:
+    if isinstance(value, float):
+        return f"{value:.1f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
+def _source_brief_line(source: LlmSourceDigest) -> str:
+    detail_parts: list[str] = []
+    details = source.details or {}
+
+    for key in ("feature_count", "station_count", "population_total"):
+        value = details.get(key)
+        if value not in (None, "", [], {}):
+            label = key.replace("_", " ")
+            detail_parts.append(f"{label}={_format_brief_scalar(value)}")
+
+    collections = details.get("top_collections") or []
+    if collections:
+        top_labels = []
+        for item in collections[:2]:
+            label = item.get("label") or item.get("collection") or "unknown"
+            count = item.get("count")
+            if count is None:
+                top_labels.append(str(label))
+            else:
+                top_labels.append(f"{label} ({count})")
+        if top_labels:
+            detail_parts.append("collections: " + ", ".join(top_labels))
+
+    observations = details.get("current_observations") or {}
+    if observations:
+        obs_parts = []
+        for item in list(observations.values())[:3]:
+            value = item.get("value")
+            if value is None:
+                continue
+            label = item.get("label") or "value"
+            unit = item.get("unit") or ""
+            obs_parts.append(f"{label} {_format_brief_scalar(value)}{unit}")
+        if obs_parts:
+            detail_parts.append("obs: " + ", ".join(obs_parts))
+
+    sat_counts = details.get("sat_pass_counts") or {}
+    if sat_counts.get("total_passes"):
+        detail_parts.append(
+            "passes: "
+            f"{sat_counts.get('total_passes')} total / "
+            f"{sat_counts.get('satellites_observing_aoi', 0)} observing"
+        )
+
+    suffix = f"; {'; '.join(detail_parts[:3])}" if detail_parts else ""
+    fallback_note = " [fallback]" if source.fallback_used else ""
+    return (
+        f"- {source.title} ({source.source_id}, {source.category}, conf={source.confidence}{fallback_note}): "
+        f"{source.summary}{suffix}"
+    )
+
+
+def _indicator_brief_line(indicator: LlmIndicatorDigest) -> str:
+    value = _format_brief_scalar(indicator.value)
+    unit = f" {indicator.unit}" if indicator.unit else ""
+    return f"- {indicator.name}: {value}{unit} ({indicator.confidence})"
+
+
+def _evidence_brief_line(evidence: LlmEvidenceDigest) -> str:
+    return f"- {evidence.title}: {evidence.detail}"
+
+
+def _build_schematic_brief(
+    *,
+    selection: LlmSelectionDigest,
+    profile: AnalysisProfile,
+    profile_focus: str,
+    source_digests: list[LlmSourceDigest],
+    indicator_digests: list[LlmIndicatorDigest],
+    evidence_catalog: list[LlmEvidenceDigest],
+    guardrails: LlmWrapperGuardrails,
+) -> str:
+    lines = [
+        (
+            f"AOI {selection.area_sqkm:.1f} km^2 | timeframe {selection.timeframe} | "
+            f"profile {profile.value} ({profile_focus})"
+        ),
+        f"Selection type: {selection.selection_type}",
+    ]
+
+    if selection.bounds_wgs84:
+        bounds = ", ".join(f"{value:.4f}" for value in selection.bounds_wgs84)
+        lines.append(f"Bounds W,S,E,N: {bounds}")
+
+    if source_digests:
+        lines.append("Sources:")
+        lines.extend(_source_brief_line(source) for source in source_digests)
+    else:
+        lines.append("Sources: none resolved")
+
+    if indicator_digests:
+        lines.append("Indicators:")
+        lines.extend(_indicator_brief_line(indicator) for indicator in indicator_digests[:8])
+
+    if evidence_catalog:
+        lines.append("Evidence anchors:")
+        lines.extend(_evidence_brief_line(evidence) for evidence in evidence_catalog[:5])
+
+    lines.append(
+        "Guardrails: "
+        f"confidence={guardrails.overall_confidence}; "
+        f"fallback={', '.join(guardrails.fallback_sources) or 'none'}; "
+        f"errors={', '.join(guardrails.error_sources) or 'none'}"
+    )
+    if guardrails.coverage_gaps:
+        lines.append("Coverage gaps:")
+        lines.extend(f"- {gap}" for gap in guardrails.coverage_gaps[:5])
+
+    return "\n".join(lines)
+
+
 def _summarize_source_details(raw_summary: dict[str, Any]) -> dict[str, Any]:
     details: dict[str, Any] = {}
 
@@ -164,17 +281,37 @@ def build_llm_wrapper_input(
         if missing:
             coverage_gaps.append(f"No resolved AOI data for requested sources: {', '.join(missing)}")
 
+    guardrails = LlmWrapperGuardrails(
+        overall_confidence=data_package.quality.overall_confidence,
+        fallback_sources=data_package.quality.fallback_sources,
+        error_sources=data_package.quality.error_sources,
+        coverage_gaps=coverage_gaps,
+    )
+
+    selection_digest = LlmSelectionDigest(
+        selection_type=data_package.selection.selection_type,
+        bounds_wgs84=data_package.selection.bounds_wgs84,
+        area_sqkm=data_package.selection.area_sqkm,
+        timeframe=data_package.scope.timeframe,
+    )
+
+    schematic_brief = _build_schematic_brief(
+        selection=selection_digest,
+        profile=profile,
+        profile_focus=PROFILE_SPECS.get(profile, PROFILE_SPECS[AnalysisProfile.GENERAL])["focus"],
+        source_digests=source_digests,
+        indicator_digests=indicator_digests,
+        evidence_catalog=evidence_catalog,
+        guardrails=guardrails,
+    )
+
     return LlmWrapperInput(
         package_id=data_package.package_id,
         profile=profile,
         profile_focus=PROFILE_SPECS.get(profile, PROFILE_SPECS[AnalysisProfile.GENERAL])["focus"],
         question=question,
-        selection=LlmSelectionDigest(
-            selection_type=data_package.selection.selection_type,
-            bounds_wgs84=data_package.selection.bounds_wgs84,
-            area_sqkm=data_package.selection.area_sqkm,
-            timeframe=data_package.scope.timeframe,
-        ),
+        schematic_brief=schematic_brief,
+        selection=selection_digest,
         counts={
             "by_source": data_package.counts.by_source,
             "by_category": data_package.counts.by_category,
@@ -183,11 +320,6 @@ def build_llm_wrapper_input(
         source_digests=source_digests,
         indicator_digests=indicator_digests,
         evidence_catalog=evidence_catalog,
-        guardrails=LlmWrapperGuardrails(
-            overall_confidence=data_package.quality.overall_confidence,
-            fallback_sources=data_package.quality.fallback_sources,
-            error_sources=data_package.quality.error_sources,
-            coverage_gaps=coverage_gaps,
-        ),
+        guardrails=guardrails,
         conversation_history=_conversation_tail(conversation_history or []),
     )

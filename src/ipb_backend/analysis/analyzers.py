@@ -672,6 +672,7 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
         area_sqkm = sel.get("area_sqkm", 0)
         bounds = sel.get("bounds_wgs84", [])
         profile_focus = PROFILE_SPECS.get(profile_value, PROFILE_SPECS[AnalysisProfile.GENERAL])["focus"]
+        schematic_brief = str(llm_input_payload.get("schematic_brief") or "").strip()
 
         system_prompt = (
             "You are a senior intelligence analyst specializing in Finnish military geography. "
@@ -694,21 +695,26 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
             "• Never invent data not in the package. If something matters but isn't measured, flag it as a gap."
         )
 
-        context_message = (
+        context_header = (
             f"AOI: {area_sqkm:.1f} km²"
             + (f" | Bounds: {', '.join(f'{b:.3f}' for b in bounds)}" if bounds else "")
-            + f"\nAnalysis profile: {profile_value.value} — {profile_focus}\n\n"
-            + "INTELLIGENCE INPUTS:\n"
-            + data_text
+            + f"\nAnalysis profile: {profile_value.value} — {profile_focus}"
         )
+        brief_context = (
+            context_header
+            + "\n\nSCHEMATIC DATA BRIEF:\n"
+            + (schematic_brief or "No wrapper brief available.")
+        )
+        detailed_context = brief_context + "\n\nDETAILED DATA ANNEX:\n" + data_text
 
         fresh_inspection_ask = (
-            "\n\nProduce an intelligence assessment of this area. Write it the way a senior analyst would brief a commander "
-            "— substance over structure, insight over inventory.\n\n"
+            "\n\nProduce an initial intelligence brief for this area. Start from the schematic data brief so the reader can "
+            "see the shape of the dataset before you interpret it. Then shift into analysis. Write it the way a senior "
+            "analyst would brief a commander — substance over structure, insight over inventory.\n\n"
             "Return JSON with these keys:\n"
-            "- summary: A flowing narrative that characterizes the area's operational profile. Length should fit the substance "
-            "— a complex AOI deserves more than a one-liner; a sparse rural area can be shorter. Do not enumerate sources. "
-            "Tell me what kind of place this is and what it means for operations.\n"
+            "- summary: Open with a concise schematic brief of the data picture: AOI/timeframe, major source coverage, strongest "
+            "signals, and key gaps/confidence. After that, characterize the area's operational profile in flowing prose. Length "
+            "should fit the substance. Do not mechanically enumerate every source.\n"
             "- findings: Array of analytical insights. Each should be a complete sentence or short paragraph that draws an "
             "operationally relevant conclusion — ideally connecting two or more data points. Include as many as the data "
             "supports — don't pad, don't truncate. Prefer 'The concentration of X near Y suggests...' over 'There are N "
@@ -726,23 +732,25 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
 
         if not is_follow_up:
             # Fresh inspection — structured JSON output
-            user_content = context_message + fresh_inspection_ask
+            user_content = detailed_context + fresh_inspection_ask
             if question:
                 user_content += f"\n\nANALYST QUESTION: {question}"
             messages = [{"role": "user", "content": user_content}]
         else:
             # Follow-up chat — natural prose, no JSON forced
-            messages.append({"role": "user", "content": context_message + "\n\n(Acknowledge briefly; the user will ask questions.)"})
-            prior_summary = ""
-            for turn in history:
-                if turn.get("role") == "assistant" and turn.get("content"):
-                    prior_summary = turn["content"]
-                    break
+            messages.append({
+                "role": "user",
+                "content": (
+                    brief_context
+                    + "\n\nUse this as stable reference context. Answer follow-up questions conversationally and directly. "
+                    "Do not force JSON, fixed sections, or a full restatement of the brief unless the user asks for it."
+                ),
+            })
             messages.append({
                 "role": "assistant",
-                "content": prior_summary or "Data loaded. Ready for questions on this AOI."
+                "content": "Reference context loaded. I will answer follow-up questions directly and only pull in the relevant evidence."
             })
-            for turn in history[1:]:
+            for turn in history:
                 role = turn.get("role", "user")
                 content = turn.get("content", "")
                 if content:
