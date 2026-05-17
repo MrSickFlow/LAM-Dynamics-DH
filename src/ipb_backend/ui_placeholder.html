@@ -486,7 +486,25 @@
       color: var(--muted);
       cursor: pointer;
       user-select: none;
+      gap: 4px;
     }
+    .overlay-all-btn {
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: none;
+      border: 1px solid var(--accent);
+      border-radius: 3px;
+      padding: 1px 5px;
+      cursor: pointer;
+      flex-shrink: 0;
+      opacity: 0.75;
+      margin-left: auto;
+      margin-right: 4px;
+    }
+    .overlay-all-btn:hover { opacity: 1; }
 
     .overlay-category-header .collapse-icon {
       transition: transform 160ms ease;
@@ -1332,10 +1350,8 @@
           </div>
           <div class="tf-forecast-panel" id="tf-forecast-panel">
             <div class="timeframe-presets" id="tf-presets">
-              <button class="tf-preset-btn" data-tf="24h"  type="button">24 h</button>
-              <button class="tf-preset-btn" data-tf="48h"  type="button">48 h</button>
-              <button class="tf-preset-btn is-active" data-tf="72h"  type="button">72 h</button>
-              <button class="tf-preset-btn" data-tf="7d"   type="button">7 d</button>
+              <button class="tf-preset-btn is-active" data-tf="24h" type="button">24 h</button>
+              <button class="tf-preset-btn" data-tf="48h" type="button">48 h</button>
             </div>
             <button class="tf-custom-toggle" id="tf-custom-toggle" type="button">▸ Custom date range</button>
             <div class="tf-custom-panel is-hidden" id="tf-custom-panel">
@@ -1351,7 +1367,7 @@
             </div>
           </div>
           <!-- Hidden value consumed by the rest of the JS -->
-          <input type="hidden" id="timeframe-input" name="timeframe" value="72h" />
+          <input type="hidden" id="timeframe-input" name="timeframe" value="24h" />
 
           <div class="control-row" style="margin-top:8px">
             <button class="btn btn-primary" id="refresh-btn" type="button" style="width:100%">Load Data</button>
@@ -1594,7 +1610,7 @@
     const state = {
       bootstrapArea: "North Karelia",
       workspaceArea: "North Karelia",
-      timeframe: "72h",
+      timeframe: "24h",
       map: null,
       collectionLayers: {},
       overlayVisibility: {},
@@ -1647,21 +1663,11 @@
     const tfApplyBtn     = document.getElementById("tf-apply-btn");
 
     let _tfMode = "forecast"; // "snapshot" | "forecast"
-    let _lastForecastTf = "72h"; // remembered when switching back from snapshot
+    let _lastForecastTf = "24h"; // remembered when switching back from snapshot
     let _pendingReload = false;  // user changed timeframe mid-load → re-fire after
     let _loadGen = 0;            // incremented each load; stale poll loops self-cancel
 
-    function setTimeframe(value, triggerLoad = false) {
-      timeframeInput.value = value;
-      state.timeframe = value;
-      if (!triggerLoad || state.sources.length === 0) return;
-      if (state.isLoading) {
-        // Coalesce rapid clicks: remember that the latest selection still needs to load.
-        _pendingReload = true;
-      } else {
-        bootstrapWorkspace();
-      }
-    }
+
 
     function setActivePresetButton(value) {
       tfPresets.querySelectorAll(".tf-preset-btn").forEach(btn => {
@@ -1669,35 +1675,51 @@
       });
     }
 
-    function setTfMode(mode, triggerLoad = false) {
+    function setTfMode(mode) {
       _tfMode = mode;
       tfModeBtns.querySelectorAll(".tf-mode-btn").forEach(btn => {
         btn.classList.toggle("is-active", btn.dataset.mode === mode);
       });
       if (mode === "snapshot") {
         tfForecastPanel.classList.add("is-hidden");
-        setTimeframe("now", triggerLoad);
+        timeframeInput.value = "now";
+        state.timeframe = "now";
       } else {
         tfForecastPanel.classList.remove("is-hidden");
         setActivePresetButton(_lastForecastTf);
-        setTimeframe(_lastForecastTf, triggerLoad);
+        timeframeInput.value = _lastForecastTf;
+        state.timeframe = _lastForecastTf;
       }
+      // Only reload weather and satellite layers — static overlays don't change with timeframe.
+      if (state.sources.length > 0) {
+        refreshTimeframeLayers();
+      }
+    }
+
+    async function refreshTimeframeLayers() {
+      // Clear only the time-sensitive overlays, then reload them in place.
+      ["satellite-tracks", "satellites"].forEach(id => state.collectionLayers[id]?.clearLayers());
+      if (state.weatherMarker) { state.map.removeLayer(state.weatherMarker); state.weatherMarker = null; }
+      renderWeather();
+      await Promise.all([loadSatelliteMapData(), loadSatelliteTrackData()]);
     }
 
     tfModeBtns.addEventListener("click", (e) => {
       const btn = e.target.closest(".tf-mode-btn");
       if (!btn || btn.dataset.mode === _tfMode) return;
-      setTfMode(btn.dataset.mode, /* triggerLoad= */ true);
+      setTfMode(btn.dataset.mode);
     });
 
     tfPresets.addEventListener("click", (e) => {
       const btn = e.target.closest(".tf-preset-btn");
       if (!btn) return;
       _lastForecastTf = btn.dataset.tf;
-      setTimeframe(btn.dataset.tf, /* triggerLoad= */ true);
+      timeframeInput.value = btn.dataset.tf;
+      state.timeframe = btn.dataset.tf;
       setActivePresetButton(btn.dataset.tf);
       tfCustomPanel.classList.add("is-hidden");
       tfCustomToggle.textContent = "▸ Custom date range";
+      if (state.sources.length > 0) refreshTimeframeLayers();
     });
 
     tfCustomToggle.addEventListener("click", () => {
@@ -1720,9 +1742,11 @@
       const startISO = new Date(startVal).toISOString().replace(".000Z", "Z");
       const endISO   = new Date(endVal).toISOString().replace(".000Z", "Z");
       const combined = `${startISO}/${endISO}`;
-      setTimeframe(combined, /* triggerLoad= */ true);
+      timeframeInput.value = combined;
+      state.timeframe = combined;
       setActivePresetButton(null);
       tfCustomToggle.textContent = `▾ ${startVal.slice(0,10)} → ${endVal.slice(0,10)}`;
+      if (state.sources.length > 0) refreshTimeframeLayers();
     });
     // --- end timeframe picker ---
 
@@ -2412,8 +2436,36 @@
 
         const header = document.createElement("div");
         header.className = "overlay-category-header";
-        header.innerHTML = `<span>${category.name}</span><span class="collapse-icon">▾</span>`;
+        header.innerHTML = `<span>${category.name}</span>`;
         if (index !== 0) header.classList.add("collapsed");
+
+        // Select/deselect all button — only for categories with layer ids
+        if (category.ids && category.ids.length > 0) {
+          const allBtn = document.createElement("button");
+          allBtn.className = "overlay-all-btn";
+          allBtn.type = "button";
+          allBtn.textContent = "all";
+          allBtn.addEventListener("click", (e) => {
+            e.stopPropagation(); // don't collapse the category
+            const body = header.nextElementSibling;
+            const checkboxes = body.querySelectorAll('input[type="checkbox"]');
+            // If any are unchecked, select all; otherwise deselect all
+            const anyUnchecked = [...checkboxes].some(cb => !cb.checked);
+            checkboxes.forEach(cb => {
+              if (cb.checked !== anyUnchecked) {
+                cb.checked = anyUnchecked;
+                cb.dispatchEvent(new Event("change"));
+              }
+            });
+          });
+          header.appendChild(allBtn);
+        }
+
+        const collapseIcon = document.createElement("span");
+        collapseIcon.className = "collapse-icon";
+        collapseIcon.textContent = "▾";
+        header.appendChild(collapseIcon);
+
         header.addEventListener("click", () => toggleCategory(header));
         wrapper.appendChild(header);
 
@@ -3762,7 +3814,7 @@
       const pointSnapshotSection = document.getElementById("point-snapshot-section");
       if (pointSnapshotSection) pointSnapshotSection.style.display = "none";
       if (pointInspectorBtn) { pointInspectorBtn.textContent = "Point Inspector"; pointInspectorBtn.style.background = ""; pointInspectorBtn.style.color = ""; }
-      state.timeframe = timeframeInput.value.trim() || "72h";
+      state.timeframe = timeframeInput.value.trim() || "24h";
       state.isLoading = true;
 
       // Clear timeframe-sensitive overlays up front so users don't see stale
