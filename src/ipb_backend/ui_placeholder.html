@@ -3786,7 +3786,7 @@
           throw new Error(`Workspace ingest failed with ${ingestResponse.status}`);
         }
 
-        const enabledIds = new Set((await ingestResponse.json()).source_ids || []);
+        const enabledIds = new Set((await ingestResponse.json()).requested_sources || []);
 
         // Map each source to the overlay loader(s) it feeds.
         const SOURCE_LOADERS = {
