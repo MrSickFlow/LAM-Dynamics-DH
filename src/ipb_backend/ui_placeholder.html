@@ -3147,7 +3147,9 @@
       refreshBtn.disabled = true;
       refreshBtn.textContent = "Loading...";
       statusLine.classList.add("is-loading");
-      statusLine.innerHTML = '<span class="status-spinner"></span>Fetching datasets — this takes 20–30 s on first load…';
+      statusLine.innerHTML = '<span class="status-spinner"></span>Fetching datasets — this takes 30–60 s on first load…';
+      const weatherPickerToggle = document.querySelector('input[data-action="weather-picker"]');
+      if (weatherPickerToggle) weatherPickerToggle.checked = false;
       state.map.getContainer().style.cursor = "";
 
       try {
@@ -3168,9 +3170,9 @@
           throw new Error(`Workspace ingest failed with ${ingestResponse.status}`);
         }
         // Ingest returns 202 immediately and runs in the background.
-        // Poll /api/sources every 2s until all enabled sources leave "idle" state (max 60s).
+        // Poll /api/sources every 2s until all enabled sources leave "idle" state (max 150s).
         const enabledIds = new Set((await ingestResponse.json()).source_ids || []);
-        const deadline = Date.now() + 90_000;
+        const deadline = Date.now() + 150_000;
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 2000));
           const pollResp = await fetch("/api/sources");

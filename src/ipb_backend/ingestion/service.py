@@ -37,11 +37,11 @@ class IngestionService:
         try:
             return await asyncio.wait_for(
                 self._fetch_one(source_id, area, timeframe, load_target),
-                timeout=50.0,
+                timeout=120.0,
             )
         except asyncio.TimeoutError:
             definition = self._registry.get(source_id)
-            updated = definition.model_copy(update={"status": SourceStatus.ERROR, "last_error": "Ingestion timed out after 50s"})
+            updated = definition.model_copy(update={"status": SourceStatus.ERROR, "last_error": "Ingestion timed out after 120s"})
             self._registry.update(updated)
             return None
 

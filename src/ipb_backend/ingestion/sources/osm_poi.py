@@ -229,7 +229,8 @@ OVERPASS_URLS = [
 
 
 class OsmPoiAdapter(SourceAdapter):
-    REQUEST_TIMEOUT = httpx.Timeout(45.0, connect=10.0)
+    # Sequential execution: Overpass rate-limits at >3 concurrent requests from one IP.
+    REQUEST_TIMEOUT = httpx.Timeout(55.0, connect=10.0)
 
     async def _query_batch(self, client: httpx.AsyncClient, query: str) -> list[dict[str, Any]]:
         last_exc: Exception | None = None
@@ -249,7 +250,6 @@ class OsmPoiAdapter(SourceAdapter):
         batch: dict[str, Any],
         b: str,
     ) -> tuple[int, list[dict[str, Any]], str | None]:
-        use_geom = batch.get("geom", False)
         query = _build_query(batch, b)
         try:
             elements = await self._query_batch(client, query)
@@ -265,10 +265,12 @@ class OsmPoiAdapter(SourceAdapter):
         categories: dict[str, list[dict[str, Any]]] = {}
         batch_errors: list[str] = []
 
+        # Run batches sequentially to avoid Overpass 429 rate limiting.
+        results = []
         async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
-            results = await asyncio.gather(
-                *[self._fetch_batch(client, i, batch, b) for i, batch in enumerate(BATCHES)]
-            )
+            for i, batch in enumerate(BATCHES):
+                result = await self._fetch_batch(client, i, batch, b)
+                results.append(result)
 
         for index, elements, error in results:
             if error:
