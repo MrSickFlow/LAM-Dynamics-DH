@@ -559,29 +559,23 @@
       border-color: var(--accent);
     }
 
-    .overlay-info-tooltip {
+    #overlay-tooltip {
       display: none;
-      position: absolute;
-      right: 0;
-      bottom: calc(100% + 6px);
-      width: 230px;
-      background: var(--card);
-      border: 1px solid var(--line);
+      position: fixed;
+      width: 240px;
+      background: #1a2420;
+      border: 1px solid rgba(255,255,255,0.12);
       border-radius: 10px;
       padding: 10px 13px;
       font-size: 0.78rem;
       font-weight: 400;
       line-height: 1.55;
-      color: var(--text);
-      z-index: 9999;
-      box-shadow: 0 6px 24px rgba(0,0,0,0.13);
+      color: #d7e0db;
+      z-index: 99999;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.45);
       pointer-events: none;
       text-transform: none;
       letter-spacing: 0;
-    }
-
-    .overlay-info-btn:hover .overlay-info-tooltip {
-      display: block;
     }
 
     .map-watermark,
@@ -1210,6 +1204,7 @@
   </style>
 </head>
 <body>
+    <div id="overlay-tooltip"></div>
   <div class="workspace">
     <div class="map-panel">
       <div id="map"></div>
@@ -1743,7 +1738,7 @@
       "poi-power_infrastructure": { color: "#f0a500", weight: 1.5, fill: false, opacity: 0.75 },
       celltowers: { point: true, color: "#888" },
       satellites: { point: true, color: "#195d85" },
-      "satellite-tracks": { color: "#c0392b", weight: 2, fill: false, opacity: 0.85 },
+      "satellite-tracks": { trackLayer: true },
       bridges: { color: "#c46c32", weight: 2.5, fill: false },
       tunnels: { color: "#8b4513", weight: 2.5, fill: false, dashArray: "8,4" },
       "road-surface": { point: true, color: "#c4a832" },
@@ -1903,6 +1898,9 @@
         zoomControl: true,
         boxZoom: false,
       }).setView(getCenter(state.bootstrapArea), 9);
+      // Custom pane for satellite ground tracks — renders below the default overlayPane (400)
+      // so track lines don't visually bury the satellite dot markers (overlayPane z=400).
+      state.map.createPane("tracksPane").style.zIndex = "350";
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 18,
@@ -1912,6 +1910,7 @@
         const style = COLL_STYLE[collection.id] || { color: "#888", weight: 1 };
 
         // Forest polygons: dark green for needleleaved (pine/spruce), medium for broadleaved/mixed.
+        // Track layer: color driven by feature._color property (red=optical, amber=SAR).
         const styleOrFn = style.forest
           ? (feature) => {
               const leaf = feature.properties?.leaf_type || "";
@@ -1920,14 +1919,24 @@
                               :                          "#1f6b2e";
               return { color: "#0a2e12", weight: 0.5, fillColor, fillOpacity: 0.38 };
             }
+          : style.trackLayer
+          ? (feature) => ({
+              color: feature.properties?._color || "#c0392b",
+              weight: 2, opacity: 0.85, fill: false,
+              pane: "tracksPane",
+            })
           : style.point ? undefined : style;
 
+        const layerOptions = { style: styleOrFn };
+        if (style.trackLayer) layerOptions.pane = "tracksPane";
         const layer = L.geoJSON(null, {
-          style: styleOrFn,
+          ...layerOptions,
           // pointToLayer fires for Point geometry regardless of whether style is a function.
           // This handles power substation nodes mixed in with line features.
           pointToLayer: (feat, latlng) => {
-            const fc = style.color || (feat.properties?._collection === "poi-power_infrastructure" ? "#f0a500" : "#888");
+            let fc = style.color || (feat.properties?._collection === "poi-power_infrastructure" ? "#f0a500" : "#888");
+            // Russian satellite dots rendered in red so they're distinct from Western ones
+            if (collection.id === "satellites" && feat.properties?.origin === "russian") fc = "#e53935";
             return L.circleMarker(latlng, {
               radius: collection.id === "celltowers" ? 6 : 5,
               fillColor: fc,
@@ -1975,8 +1984,18 @@
                 if (props.next_pass) details += `<br>Next pass: <b>${new Date(props.next_pass).toUTCString().replace(" GMT","Z")}</b>`;
                 const swath = SAT_SWATH_KM[props.type] || null;
                 if (swath) details += `<br>Sensor swath: <b>~${swath} km</b>`;
+                if (props.origin === "russian") details += `<br><small style="color:#e57373">Russian satellite</small>`;
                 if (!props.has_position) details += `<br><small style="color:#aaa">Position estimated</small>`;
                 layerRef.on("click", () => showSatelliteFootprint(feature, swath));
+              } else if (collection.id === "satellite-tracks") {
+                const start = props.track_start_utc ? new Date(props.track_start_utc).toUTCString().replace(" GMT","Z") : "?";
+                const end   = props.track_end_utc   ? new Date(props.track_end_utc).toUTCString().replace(" GMT","Z") : "?";
+                const threat = props.is_sar
+                  ? `<br><b style="color:#e67e22">⚠ SAR — all-weather, day/night imaging</b>`
+                  : `<br><b style="color:#c0392b">⚠ Optical — requires daylight &amp; clear sky</b>`;
+                details = `<br>${props.type}${threat}<br><small>From: ${start}</small><br><small>To: ${end}</small>`;
+                layerRef.bindPopup(`<b>${props.name}</b>${details}`);
+                return;
               } else if (props.next_pass) {
                 details += `<br>Next pass: ${props.next_pass}`;
               }
@@ -2232,9 +2251,27 @@
             <input type="checkbox" ${isOverlayVisible("weather") ? "checked" : ""} data-collection="weather" />
             <span class="overlay-swatch" style="background:#c46c32"></span>
             <span style="flex:1">Current Weather (station)</span>
-            <span class="overlay-info-btn" title="">i<span class="overlay-info-tooltip">${OVERLAY_INFO["weather"] || ""}</span></span>
+            <span class="overlay-info-btn" data-info="${encodeURIComponent(OVERLAY_INFO["weather"] || "")}">i</span>
           `;
           el.querySelector("input").addEventListener("change", toggleOverlay);
+          const weatherBtn = el.querySelector(".overlay-info-btn");
+          if (weatherBtn) {
+            weatherBtn.addEventListener("click", (e) => e.stopPropagation());
+            weatherBtn.addEventListener("mouseenter", () => {
+              const text = decodeURIComponent(weatherBtn.dataset.info || "");
+              if (!text) return;
+              _overlayTooltipEl.textContent = text;
+              const r = weatherBtn.getBoundingClientRect();
+              _overlayTooltipEl.style.display = "block";
+              const tipW = 240;
+              let left = r.right - tipW;
+              if (left < 8) left = 8;
+              const top = r.top - _overlayTooltipEl.offsetHeight - 8;
+              _overlayTooltipEl.style.left = left + "px";
+              _overlayTooltipEl.style.top = (top < 8 ? r.bottom + 8 : top) + "px";
+            });
+            weatherBtn.addEventListener("mouseleave", () => { _overlayTooltipEl.style.display = "none"; });
+          }
           body.appendChild(el);
 
         }
@@ -2298,6 +2335,7 @@
       "poi-power_infrastructure": "Power line network (OSM) shown as lines — reveals actual grid routing and dependencies. Substation and generator locations shown as points. Far more complete than the NLS power lines layer.",
     };
 
+    const _overlayTooltipEl = document.getElementById("overlay-tooltip");
     function buildOverlayControl(item) {
       const info = OVERLAY_INFO[item.id] || "";
       const label = document.createElement("label");
@@ -2306,12 +2344,30 @@
         <input type="checkbox" ${isOverlayVisible(item.id) ? "checked" : ""} data-collection="${item.id}" />
         <span class="overlay-swatch" style="background:${item.color || "#888"}"></span>
         <span style="flex:1">${item.label}</span>
-        ${info ? `<span class="overlay-info-btn" title="">i<span class="overlay-info-tooltip">${info}</span></span>` : ""}
+        ${info ? `<span class="overlay-info-btn" data-info="${encodeURIComponent(info)}">i</span>` : ""}
       `;
       label.querySelector("input").addEventListener("change", toggleOverlay);
-      // Prevent info button click from toggling the checkbox
       const btn = label.querySelector(".overlay-info-btn");
-      if (btn) btn.addEventListener("click", (e) => e.stopPropagation());
+      if (btn) {
+        btn.addEventListener("click", (e) => e.stopPropagation());
+        btn.addEventListener("mouseenter", (e) => {
+          const text = decodeURIComponent(btn.dataset.info || "");
+          if (!text) return;
+          _overlayTooltipEl.textContent = text;
+          const r = btn.getBoundingClientRect();
+          _overlayTooltipEl.style.display = "block";
+          // Position above the button, aligned to its right edge
+          const tipW = 240;
+          let left = r.right - tipW;
+          if (left < 8) left = 8;
+          const top = r.top - _overlayTooltipEl.offsetHeight - 8;
+          _overlayTooltipEl.style.left = left + "px";
+          _overlayTooltipEl.style.top = (top < 8 ? r.bottom + 8 : top) + "px";
+        });
+        btn.addEventListener("mouseleave", () => {
+          _overlayTooltipEl.style.display = "none";
+        });
+      }
       return label;
     }
 
@@ -2472,30 +2528,11 @@
           return;
         }
         setLayerAvailability(["satellite-tracks"], true);
-        geojson.features.forEach((feature) => {
-          const layer = state.collectionLayers["satellite-tracks"];
-          if (!layer) return;
-          const props = feature.properties || {};
-          const satType = props.type || "";
-          // SAR satellites shown in amber (all-weather threat); optical in red
-          const isSar = satType.toLowerCase().includes("sar");
-          const lineColor = isSar ? "#e67e22" : "#c0392b";
-          // Draw swath corridor as a semi-transparent polygon alongside the track line
-          L.geoJSON(feature, {
-            style: { color: lineColor, weight: 2.5, opacity: 0.9, fill: false },
-            onEachFeature: (feat, layerRef) => {
-              const p = feat.properties || {};
-              const start = p.track_start_utc ? new Date(p.track_start_utc).toUTCString().replace(" GMT","Z") : "?";
-              const end   = p.track_end_utc   ? new Date(p.track_end_utc).toUTCString().replace(" GMT","Z") : "?";
-              const sarNote = isSar ? "<br><b style='color:#e67e22'>⚠ SAR — all-weather, day/night imaging</b>" : "<br><b style='color:#c0392b'>⚠ Optical — requires daylight &amp; clear sky</b>";
-              layerRef.bindPopup(
-                `<b>${p.name}</b><br>${p.type}${sarNote}<br><small>Track: ${start}</small><br><small>to: ${end}</small>`
-              );
-            },
-          }).addTo(layer);
-        });
+        const layer = state.collectionLayers["satellite-tracks"];
+        if (!layer) return;
+        layer.addData(geojson);
         const checkbox = document.querySelector('input[data-collection="satellite-tracks"]');
-        if (!checkbox || checkbox.checked) state.collectionLayers["satellite-tracks"]?.addTo(state.map);
+        if (!checkbox || checkbox.checked) layer.addTo(state.map);
       } catch (error) {
         console.error("Satellite track load failed:", error);
         setLayerAvailability(["satellite-tracks"], false, "Ground track data unavailable.");

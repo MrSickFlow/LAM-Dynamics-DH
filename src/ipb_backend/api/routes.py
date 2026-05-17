@@ -807,6 +807,11 @@ async def map_data_satellite_tracks(
         if current:
             segments.append(current)
 
+        sat_type = info.get("type", "")
+        is_sar = "sar" in sat_type.lower()
+        # Color encoded in properties so the frontend style function can read it
+        line_color = "#e67e22" if is_sar else "#c0392b"
+
         # One feature per continuous segment
         for seg_coords in segments:
             if len(seg_coords) < 2:
@@ -817,16 +822,13 @@ async def map_data_satellite_tracks(
                 "properties": {
                     "_collection": "satellite-tracks",
                     "name": name,
-                    "type": info.get("type", ""),
+                    "type": sat_type,
                     "norad_id": info.get("norad_id"),
                     "track_start_utc": points[0]["t_iso"],
                     "track_end_utc": points[-1]["t_iso"],
                     "track_hours": hours,
-                    # Attach full time series for hover tooltips
-                    "points": [
-                        {"lat": p["lat"], "lon": p["lon"], "t_iso": p["t_iso"], "t_unix": p["t_unix"]}
-                        for p in points if not p.get("crossing")
-                    ],
+                    "is_sar": is_sar,
+                    "_color": line_color,
                 },
             })
 
