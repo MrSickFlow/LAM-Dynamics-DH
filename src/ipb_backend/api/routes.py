@@ -51,6 +51,7 @@ from ipb_backend.planning import (
 )
 from ipb_backend.planning.explainer import enrich_with_narratives
 from ipb_backend.spatial import (
+    bbox_to_mask,
     clip_geojson_feature,
     filter_features_by_bbox,
     geojson_to_shape,
@@ -555,6 +556,14 @@ async def map_data_nls(
     note = str(nls_record.data.get("note", "") or "")
     is_demo_fallback = "Demo spatial fallback" in note
 
+    # Build a clip mask from the record's own load bbox so that municipality polygons
+    # (which the NLS API returns clipped only at its tile/feature boundary, not at our bbox)
+    # are confined to the requested rectangle.
+    CLIP_TO_BBOX_COLLECTIONS = {"kunta", "kunnanhallintoraja"}
+    raw_bbox_str = nls_record.data.get("query", {}).get("bbox_wgs84")
+    load_bbox = parse_bbox_param(raw_bbox_str) if raw_bbox_str else None
+    load_mask = bbox_to_mask(load_bbox) if load_bbox else None
+
     collections = nls_record.data.get("collections", {})
     features = []
     for coll_id, coll_data in collections.items():
@@ -564,11 +573,16 @@ async def map_data_nls(
                 props = sample.get("properties", {})
                 props["_collection"] = coll_id
                 props["_label"] = label
-                features.append({
+                feature = {
                     "type": "Feature",
                     "geometry": sample["geometry"],
                     "properties": props,
-                })
+                }
+                if coll_id in CLIP_TO_BBOX_COLLECTIONS and load_mask is not None:
+                    feature = clip_geojson_feature(feature, load_mask)
+                    if feature is None:
+                        continue
+                features.append(feature)
     features = filter_features_by_bbox(features, parse_bbox_param(bbox))
     payload = {"type": "FeatureCollection", "features": features, "available": True}
     if is_demo_fallback:

@@ -87,6 +87,11 @@ def geometry_bounds(geometry: dict[str, Any]) -> tuple[float, float, float, floa
     return float(min_x), float(min_y), float(max_x), float(max_y)
 
 
+def bbox_to_mask(bbox: tuple[float, float, float, float]) -> BaseGeometry:
+    """Return a Shapely geometry (box) for the given WGS-84 bbox."""
+    return box(*bbox)
+
+
 def bbox_to_polygon(bbox: tuple[float, float, float, float]) -> dict[str, Any]:
     min_x, min_y, max_x, max_y = bbox
     return mapping(box(min_x, min_y, max_x, max_y))

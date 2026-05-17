@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 
 from ipb_backend.ingestion.base import SourceAdapter
-from ipb_backend.models import DatasetRecord, LoadTarget
+from ipb_backend.models import DatasetRecord, LoadTarget, LoadTargetKind
 
 
 FORECAST_PARAMETERS = ("Temperature", "Pressure", "Humidity", "TotalCloudCover", "WindSpeedMS", "WindDirection", "Precipitation1h", "Visibility")
@@ -57,10 +57,21 @@ class FmiAdapter(SourceAdapter):
     }
 
     async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
-        place = self._resolve_place(area)
         start_time, end_time = self._resolve_time_window(timeframe)
-        xml_payload = await self._fetch_xml(place, start_time, end_time)
-        parsed = self._parse_response(xml_payload)
+
+        # When a custom bbox load target is given, query by the centroid of the bbox so
+        # that we find the nearest weather station regardless of whether it sits inside
+        # the drawn rectangle or in a nearby municipality.
+        if load_target is not None and load_target.kind == LoadTargetKind.BBOX and load_target.bbox_wgs84:
+            min_x, min_y, max_x, max_y = load_target.bbox_wgs84
+            center_lat = (min_y + max_y) / 2.0
+            center_lon = (min_x + max_x) / 2.0
+            parsed = await self.fetch_observations_by_latlon(center_lat, center_lon, start_time, end_time)
+            place = f"{center_lat:.4f},{center_lon:.4f}"
+        else:
+            place = self._resolve_place(area)
+            xml_payload = await self._fetch_xml(place, start_time, end_time)
+            parsed = self._parse_response(xml_payload)
 
         return DatasetRecord(
             source_id=self.definition.source_id,

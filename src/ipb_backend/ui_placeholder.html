@@ -1146,7 +1146,7 @@
       <aside class="settings-panel" id="settings-panel">
         <div class="panel-card">
           <div class="panel-title">Data Load Area</div>
-          <p class="panel-copy">Choose a named area, use the current map view, or draw a rectangle first. The workspace loads datasets for that region, then Shift + drag draws the AOI inspection polygon.</p>
+          <p class="panel-copy">Choose a named area or draw a rectangle. The workspace loads datasets for that region, then Shift + drag draws the AOI inspection polygon.</p>
           <div class="control-row">
             <select id="area-select" class="area-select">
               <option value="North Karelia">North Karelia</option>
@@ -1156,7 +1156,6 @@
           </div>
           <div class="control-row">
             <button class="btn btn-secondary" id="use-preset-btn" type="button">Use Preset</button>
-            <button class="btn btn-secondary" id="use-view-btn" type="button">Use Map View</button>
           </div>
           <div class="control-row">
             <button class="btn btn-secondary" id="draw-load-area-btn" type="button">Draw Load Rectangle</button>
@@ -1422,7 +1421,6 @@
     const timeframeInput = document.getElementById("timeframe-input");
     const areaSelect = document.getElementById("area-select");
     const usePresetBtn = document.getElementById("use-preset-btn");
-    const useViewBtn = document.getElementById("use-view-btn");
     const drawLoadAreaBtn = document.getElementById("draw-load-area-btn");
     const pointInspectorBtn = document.getElementById("point-inspector-btn");
     const loadTargetLabel = document.getElementById("load-target-label");
@@ -1548,7 +1546,7 @@
     ];
 
     const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites", "digitraffic-road-surface"];
-    const CUSTOM_LOAD_SOURCE_IDS = ["nls", "statistics-finland", "digiroad", "osm-poi"];
+    const CUSTOM_LOAD_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "osm-poi"];
     const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-logistics", "poi-ports_terminals", "poi-forest", "poi-religion"]);
 
     const COLL_STYLE = {
@@ -3412,14 +3410,6 @@
       setNamedAreaLoadTarget(areaSelect.value);
       clearSelection();
       statusLine.textContent = "Preset area selected. Click Load Data to fetch datasets.";
-    });
-
-    useViewBtn.addEventListener("click", () => {
-      if (!state.map) initMap();
-      const bbox = currentMapBbox();
-      setCustomLoadTarget(bbox, "Current Map View");
-      clearSelection();
-      statusLine.textContent = "Current map view selected as the load area. Click Load Data to fetch datasets.";
     });
 
     drawLoadAreaBtn.addEventListener("click", () => {
