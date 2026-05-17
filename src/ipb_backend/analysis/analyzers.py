@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -295,11 +296,42 @@ def _ts_stats(param_data: dict[str, Any]) -> dict[str, Any]:
 def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, Any]) -> str:
     """Build a compact, military-relevant text description of all available data."""
     lines: list[str] = []
+    sel = data_package.get("selection") or {}
+    area_sqkm = float(sel.get("area_sqkm") or 0)
+    bounds = sel.get("bounds_wgs84", [])
 
-    # NLS terrain
+    # Header: AOI summary
+    if bounds and len(bounds) == 4:
+        center_lon = (bounds[0] + bounds[2]) / 2
+        center_lat = (bounds[1] + bounds[3]) / 2
+        extent_km_lat = (bounds[3] - bounds[1]) * 111
+        extent_km_lon = (bounds[2] - bounds[0]) * 111 * math.cos(math.radians(center_lat))
+        lines.append(
+            f"AOI CENTER: ({center_lat:.4f}°N, {center_lon:.4f}°E) — "
+            f"extent ~{extent_km_lon:.1f} km E-W × {extent_km_lat:.1f} km N-S"
+        )
+
+    timeframe = (data_package.get("scope") or {}).get("timeframe") or ""
+    if timeframe:
+        lines.append(f"TIMEFRAME: {timeframe}")
+
+    quality = data_package.get("quality", {}) or {}
+    conf = quality.get("overall_confidence", "")
+    if conf:
+        gaps = quality.get("coverage_gaps") or []
+        fallbacks = quality.get("fallback_sources") or []
+        confidence_note = f"DATA CONFIDENCE: {conf}"
+        if fallbacks:
+            confidence_note += f" — fallback sources: {', '.join(fallbacks)}"
+        if gaps:
+            confidence_note += f" — gaps: {'; '.join(gaps[:3])}"
+        lines.append(confidence_note)
+
+    # NLS terrain — with % composition
     nls = raw_data.get("nls", {})
     if nls.get("feature_count") or nls.get("collections"):
         cols = nls.get("collections", [])
+        total_nls = sum(c.get("count", 0) for c in cols) or 1
         if cols:
             terrain_lines = []
             for col in cols:
@@ -307,21 +339,33 @@ def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, An
                 count = col.get("count", 0)
                 cid = col.get("collection", "")
                 mil = _NLS_TERRAIN_MILITARY.get(cid)
+                pct = (count / total_nls * 100) if total_nls else 0
+                pct_str = f", {pct:.0f}% of terrain features" if pct > 5 else ""
                 if mil and count:
-                    terrain_lines.append(f"  - {mil[0]} ({count} features): {mil[1]}")
+                    terrain_lines.append(f"  - {mil[0]} ({count} features{pct_str}): {mil[1]}")
                 elif count:
-                    terrain_lines.append(f"  - {label} ({count} features)")
+                    terrain_lines.append(f"  - {label} ({count} features{pct_str})")
             if terrain_lines:
-                lines.append("NLS TERRAIN DATA:")
+                lines.append(f"NLS TERRAIN DATA ({nls.get('feature_count', total_nls)} total features):")
                 lines.extend(terrain_lines)
 
-    # Digiroad roads/bridges
+    # Digiroad roads/bridges — show ALL collections (bridges/tunnels/ferries are critical for IPB)
     digiroad = raw_data.get("digiroad", {})
     if digiroad.get("feature_count"):
-        lines.append(f"ROAD INFRASTRUCTURE: {digiroad['feature_count']} Digiroad features (roads, bridges, tunnels)")
+        lines.append(f"ROAD INFRASTRUCTURE: {digiroad['feature_count']} Digiroad features")
         if digiroad.get("collections"):
-            for col in digiroad["collections"][:3]:
-                lines.append(f"  - {col.get('label', col.get('collection', ''))}: {col.get('count', 0)}")
+            for col in digiroad["collections"]:
+                cid = col.get("collection", "")
+                label = col.get("label", cid)
+                count = col.get("count", 0)
+                note = ""
+                if "silta" in cid or "bridge" in cid.lower():
+                    note = " — bridge crossings (weight/clearance limits constrain heavy vehicles)"
+                elif "tunneli" in cid or "tunnel" in cid.lower():
+                    note = " — tunnel chokepoints (mobility constraint, defensive position)"
+                elif "lautta" in cid or "ferry" in cid.lower():
+                    note = " — ferry routes (subject to weather/seasonal closure)"
+                lines.append(f"  - {label}: {count}{note}")
 
     # ── Weather ──────────────────────────────────────────────────────────────
     fmi = raw_data.get("fmi", {})
@@ -468,22 +512,63 @@ def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, An
             f"({sat_data.get('satellites_total_tracked')} satellites tracked globally)"
         )
 
-    # Population
+    # Population — with density
     pop = raw_data.get("statistics-finland", {})
     if pop.get("population_total"):
         total = pop["population_total"]
+        density = total / area_sqkm if area_sqkm else 0
         if total < 100:
             civil_note = "minimal civilian presence — low CIVCAS risk"
         elif total < 1000:
             civil_note = "moderate civilian presence — CIVCAS precautions required"
         else:
             civil_note = "significant civilian population — high CIVCAS risk, urban ROE apply"
-        lines.append(f"POPULATION: {total} residents in AOI — {civil_note}")
+        density_descriptor = ""
+        if density > 500:
+            density_descriptor = " (urban density)"
+        elif density > 50:
+            density_descriptor = " (suburban/village density)"
+        elif density > 5:
+            density_descriptor = " (sparse rural)"
+        else:
+            density_descriptor = " (very sparse / wilderness)"
+        lines.append(
+            f"POPULATION: {total} residents in AOI — {density:.1f} persons/km²{density_descriptor}. {civil_note}"
+        )
+        coverage = pop.get("population_coverage_ratio")
+        if coverage:
+            lines.append(f"  - Coverage: {coverage*100:.1f}% of source population dataset intersects AOI")
 
-    # Cell towers / comms
+    # Cell towers / comms — break down by radio technology and operator
     cell = raw_data.get("opencellid", {})
-    if cell.get("feature_count"):
-        lines.append(f"COMMUNICATIONS: {cell['feature_count']} cell towers — civilian comms infrastructure present")
+    cell_count = cell.get("feature_count") or 0
+    if cell_count:
+        radio_counts: dict[str, int] = {}
+        operator_counts: dict[str, int] = {}
+        for feat in cell.get("features", []) or []:
+            props = feat.get("properties") or {}
+            radio = (props.get("radio") or "").upper() or "UNKNOWN"
+            radio_counts[radio] = radio_counts.get(radio, 0) + 1
+            mcc = props.get("mcc")
+            mnc = props.get("mnc")
+            if mcc and mnc is not None:
+                key = f"MCC {mcc}/MNC {mnc}"
+                operator_counts[key] = operator_counts.get(key, 0) + 1
+        lines.append(f"COMMUNICATIONS: {cell_count} cell towers — civilian comms baseline present")
+        if radio_counts:
+            mix = ", ".join(f"{r}: {n}" for r, n in sorted(radio_counts.items(), key=lambda x: -x[1]))
+            lines.append(f"  - Technology mix: {mix}")
+        if operator_counts:
+            top_ops = sorted(operator_counts.items(), key=lambda x: -x[1])[:3]
+            ops_str = ", ".join(f"{op} ({n})" for op, n in top_ops)
+            lines.append(f"  - Top operator codes: {ops_str}")
+        density_cell = cell_count / area_sqkm if area_sqkm else 0
+        if density_cell > 2:
+            lines.append(f"  - Density {density_cell:.1f}/km²: dense coverage, strong SIGINT/EW environment")
+        elif density_cell > 0.5:
+            lines.append(f"  - Density {density_cell:.1f}/km²: moderate coverage")
+        else:
+            lines.append(f"  - Density {density_cell:.2f}/km²: sparse coverage, mil comms must be self-sufficient")
     elif cell.get("feature_count") == 0:
         lines.append("COMMUNICATIONS: No cell towers detected — poor civilian comms coverage, degraded SIGINT environment")
 
@@ -589,47 +674,65 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
         profile_focus = PROFILE_SPECS.get(profile_value, PROFILE_SPECS[AnalysisProfile.GENERAL])["focus"]
 
         system_prompt = (
-            "You are a senior intelligence analyst specializing in Finnish military geography and operational terrain assessment. "
-            "You draw on open-source data — NLS topography, Digiroad road network, FMI weather, Statistics Finland, "
-            "OpenCellID, and OpenStreetMap — to produce intelligence estimates that read like a real intelligence product. "
-            "Your job is to synthesize across data sources and reveal what the area means operationally — not to list "
-            "what each data source contains. Connect the dots. Surface non-obvious implications. "
-            "A forested lake district means something different from open agricultural terrain bisected by roads. "
-            "A military installation near a power substation and a fuel depot is a different picture than any of those alone. "
-            "Use the OAKOC framework as an analytical lens, not a checklist. "
-            "Never invent data not in the package. Flag genuine gaps explicitly."
+            "You are a senior intelligence analyst specializing in Finnish military geography. "
+            "You draw on open-source data — NLS topography, Digiroad road network, FMI weather (observed + forecast), "
+            "satellite overpass schedules (including Russian reconnaissance), Statistics Finland population, "
+            "OpenCellID cell tower data, and OpenStreetMap POIs — to produce intelligence estimates "
+            "that read like a real intel product, not a data inventory.\n\n"
+            "Your discipline:\n"
+            "• Synthesize across sources. The dots only matter once connected. A forested lake district means "
+            "something different from open agricultural terrain bisected by roads. A military installation near "
+            "a power substation and a fuel depot is a different picture than any of those alone.\n"
+            "• Look for asymmetries and tensions. What's surprising or unusual about this area? "
+            "Where do data points contradict or amplify each other? What's the dominant character — and what cuts against it?\n"
+            "• Think from the adversary's seat. What would they target? Where would they hide? Where are the chokepoints, "
+            "the soft logistics tails, the overlooked seams between sectors?\n"
+            "• Translate data to operational consequence. 'Wind 11 m/s' is not an insight — 'the forecast window when "
+            "small UAS can fly closes around 1400Z' is. 'N cell towers' is not an insight — 'comms coverage degrades "
+            "sharply once forces move north of the river' is.\n"
+            "• Use OAKOC, PMESII-PT, and CCIR thinking as analytical lenses, not checklists or section headers.\n"
+            "• Never invent data not in the package. If something matters but isn't measured, flag it as a gap."
         )
 
         context_message = (
             f"AOI: {area_sqkm:.1f} km²"
             + (f" | Bounds: {', '.join(f'{b:.3f}' for b in bounds)}" if bounds else "")
             + f"\nAnalysis profile: {profile_value.value} — {profile_focus}\n\n"
+            + "INTELLIGENCE INPUTS:\n"
             + data_text
-            + "\n\nProduce an intelligence assessment of this area. "
-            "Return JSON with three keys:\n"
-            "- summary: A flowing 3-5 sentence narrative that characterizes the area's operational profile. "
-            "Do not list data sources — synthesize them into a picture of what this area is and what it means. "
-            "What is the dominant terrain character? What does the infrastructure tell you? What are the key tensions or opportunities?\n"
-            "- findings: Array of 7-10 analytical insights. Each should be a complete sentence or two that draws an operationally "
-            "relevant conclusion — ideally connecting two or more data points. Avoid restating raw counts. "
-            "Prefer insights like 'The concentration of X near Y suggests...' over 'There are N features of type Z.'\n"
-            "- limitations: Array of genuine data gaps that affect the assessment."
         )
 
-        # Build message list — prepend context on first turn, use history for follow-ups
+        fresh_inspection_ask = (
+            "\n\nProduce an intelligence assessment of this area. Write it the way a senior analyst would brief a commander "
+            "— substance over structure, insight over inventory.\n\n"
+            "Return JSON with these keys:\n"
+            "- summary: A flowing narrative that characterizes the area's operational profile. Length should fit the substance "
+            "— a complex AOI deserves more than a one-liner; a sparse rural area can be shorter. Do not enumerate sources. "
+            "Tell me what kind of place this is and what it means for operations.\n"
+            "- findings: Array of analytical insights. Each should be a complete sentence or short paragraph that draws an "
+            "operationally relevant conclusion — ideally connecting two or more data points. Include as many as the data "
+            "supports — don't pad, don't truncate. Prefer 'The concentration of X near Y suggests...' over 'There are N "
+            "features of type Z.' Surface what's non-obvious.\n"
+            "- tactical_commentary: A free-form analyst-voice paragraph (or two). Use this for the things that don't fit "
+            "neatly into findings: hunches, second-order effects, what would worry you, what an adversary might exploit, "
+            "what you'd want reconnaissance to confirm. Be direct.\n"
+            "- limitations: Array of genuine data gaps and uncertainties affecting the assessment."
+        )
+
+        # Build message list — fresh inspection vs follow-up paths
         messages: list[dict[str, Any]] = []
         history = conversation_history or []
+        is_follow_up = bool(history) and any(t.get("role") == "user" for t in history)
 
-        if not history:
-            # Fresh inspection
-            user_content = context_message
+        if not is_follow_up:
+            # Fresh inspection — structured JSON output
+            user_content = context_message + fresh_inspection_ask
             if question:
                 user_content += f"\n\nANALYST QUESTION: {question}"
             messages = [{"role": "user", "content": user_content}]
         else:
-            # Follow-up conversation — seed with context then replay history
-            messages.append({"role": "user", "content": context_message})
-            # Use the actual prior summary as the assistant seed so conversation is grounded
+            # Follow-up chat — natural prose, no JSON forced
+            messages.append({"role": "user", "content": context_message + "\n\n(Acknowledge briefly; the user will ask questions.)"})
             prior_summary = ""
             for turn in history:
                 if turn.get("role") == "assistant" and turn.get("content"):
@@ -637,7 +740,7 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
                     break
             messages.append({
                 "role": "assistant",
-                "content": prior_summary or json.dumps({"summary": "AOI data loaded.", "findings": [], "limitations": []})
+                "content": prior_summary or "Data loaded. Ready for questions on this AOI."
             })
             for turn in history[1:]:
                 role = turn.get("role", "user")
@@ -648,14 +751,27 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
                 messages.append({"role": "user", "content": question})
 
         try:
-            text = await self._call_api(system_prompt, messages)
+            text = await self._call_api(system_prompt, messages, max_tokens=3000)
         except Exception as exc:
             raise ValueError(f"Claude API call failed: {exc}") from exc
 
-        parsed = _parse_llm_response(text)
-        findings = parsed["findings"]
-        summary = parsed["summary"] or (findings[0] if findings else text[:200])
-        limitations = parsed["limitations"]
+        if is_follow_up:
+            # Free-prose conversation turn — return as summary, no findings/limitations parsing
+            findings: list[str] = []
+            summary = text.strip()
+            limitations: list[str] = []
+        else:
+            parsed = _parse_llm_response(text)
+            findings = parsed["findings"]
+            summary = parsed["summary"] or (findings[0] if findings else text[:200])
+            limitations = parsed["limitations"]
+            # Tactical commentary, if present, is appended to summary as a separate paragraph
+            try:
+                payload = json.loads(_strip_code_fence(text))
+                if isinstance(payload, dict) and payload.get("tactical_commentary"):
+                    summary = f"{summary}\n\n— {str(payload['tactical_commentary']).strip()}"
+            except (json.JSONDecodeError, TypeError):
+                pass
 
         evidence_refs = _evidence_refs(package)
         structured_output = _build_structured_output(
