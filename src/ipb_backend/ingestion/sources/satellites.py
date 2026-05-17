@@ -83,6 +83,55 @@ RECON_NAMES: dict[str, str] = {
     "Lotos-S1": "Russian ELINT",
 }
 
+# Russian military satellites identified by NORAD catalog number.
+# These fly under opaque COSMOS designations and would otherwise be missed.
+RUSSIAN_MILITARY_NORAD: dict[str, tuple[str, str]] = {
+    # Persona — high-resolution optical military reconnaissance
+    "39177": ("Persona 1 (Kosmos-2486)", "Russian optical recon (<1m)"),
+    "40699": ("Persona 2 (Kosmos-2506)", "Russian optical recon (<1m)"),
+    "41855": ("Persona 3 (Kosmos-2519)", "Russian optical recon (<1m)"),
+    # Bars-M — military topographic/mapping satellites
+    "40420": ("Bars-M 1 (Kosmos-2503)", "Russian topographic imaging"),
+    "41394": ("Bars-M 2 (Kosmos-2515)", "Russian topographic imaging"),
+    # Lotos-S1 — signals intelligence (SIGINT/ELINT)
+    "41099": ("Lotos-S1 (Kosmos-2512)", "Russian SIGINT"),
+    "42986": ("Lotos-S1 2 (Kosmos-2523)", "Russian SIGINT"),
+    "44421": ("Lotos-S1 3 (Kosmos-2535)", "Russian SIGINT"),
+    # KONDOR-FKA — SAR imaging (all-weather, day/night)
+    "56756": ("Kondor-FKA 1", "Russian SAR imaging"),
+    "62138": ("Kondor-FKA 2", "Russian SAR imaging"),
+    # Obzor-R — SAR imaging
+    "67234": ("Obzor-R 1", "Russian SAR imaging"),
+    # Resurs-P — civilian/dual-use high-resolution optical
+    "39186": ("Resurs-P 1", "Russian imaging (1m)"),
+    "40398": ("Resurs-P 2", "Russian imaging (1m)"),
+    "41386": ("Resurs-P 3", "Russian imaging (1m)"),
+    "59371": ("Resurs-P 4", "Russian imaging (1m)"),
+    "62430": ("Resurs-P 5", "Russian imaging (1m)"),
+    # KANOPUS-V — civilian optical imaging constellation
+    "38707": ("KANOPUS-V 1", "Russian imaging (2.5m)"),
+    "42825": ("KANOPUS-V-IK", "Russian imaging (2.5m)"),
+    "43180": ("KANOPUS-V 3", "Russian imaging (2.5m)"),
+    "43181": ("KANOPUS-V 4", "Russian imaging (2.5m)"),
+    "43876": ("KANOPUS-V 5", "Russian imaging (2.5m)"),
+    "43877": ("KANOPUS-V 6", "Russian imaging (2.5m)"),
+    # Recent COSMOS imaging/EW satellites (high-inc LEO, active)
+    "44424": ("Kosmos-2538", "Russian military imaging"),
+    "52713": ("Kosmos-2556", "Russian military imaging"),
+    "53323": ("Kosmos-2558", "Russian military imaging"),
+    "54109": ("Kosmos-2561", "Russian military imaging"),
+    "55978": ("Kosmos-2567", "Russian military imaging"),
+    "58435": ("Kosmos-2572", "Russian military imaging"),
+    "58614": ("Kosmos-2573", "Russian military imaging"),
+    "58929": ("Kosmos-2575", "Russian military imaging"),
+    "59773": ("Kosmos-2576", "Russian military imaging"),
+    "61730": ("Kosmos-2579", "Russian military imaging"),
+    "65267": ("Kosmos-2591", "Russian military imaging"),
+    "65268": ("Kosmos-2592", "Russian military imaging"),
+    "65269": ("Kosmos-2593", "Russian military imaging"),
+    "65270": ("Kosmos-2594", "Russian military imaging"),
+}
+
 
 class SatelliteTleAdapter(SourceAdapter):
     def _resolve_center(self, area: str) -> dict[str, float]:
@@ -170,14 +219,25 @@ class SatelliteTleAdapter(SourceAdapter):
             data={"identity": settings.space_track_username, "password": settings.space_track_password},
         )
         login_resp.raise_for_status()
+
+        # Query 1: general pool of recent active satellites (name-matched)
         gp_resp = await client.get(
             "https://www.space-track.org/basicspacedata/query/class/gp/orderby/EPOCH%20DESC/format/json/limit/2000"
         )
         gp_resp.raise_for_status()
+
+        # Query 2: Russian military satellites by specific NORAD IDs
+        norad_ids = ",".join(RUSSIAN_MILITARY_NORAD.keys())
+        ru_resp = await client.get(
+            f"https://www.space-track.org/basicspacedata/query/class/gp/NORAD_CAT_ID/{norad_ids}/DECAY_DATE/null-val/format/json"
+        )
+        ru_resp.raise_for_status()
+
         import json
-        satellites_data = json.loads(gp_resp.text)
-        result = {}
-        for sat in satellites_data:
+        result: dict[str, dict[str, Any]] = {}
+
+        # Process name-matched satellites first
+        for sat in json.loads(gp_resp.text):
             name = (sat.get("OBJECT_NAME") or "").strip()
             matched = self._match_space_track_name(name)
             if matched and name not in result:
@@ -189,7 +249,27 @@ class SatelliteTleAdapter(SourceAdapter):
                     "type": matched,
                     "tle_line_1": tle_line1,
                     "tle_line_2": tle_line2,
+                    "origin": "russian" if "Russian" in matched else "other",
                 }
+
+        # Process Russian military satellites by NORAD ID (overrides name lookup)
+        for sat in json.loads(ru_resp.text):
+            norad = str(sat.get("NORAD_CAT_ID") or "")
+            if norad not in RUSSIAN_MILITARY_NORAD:
+                continue
+            friendly_name, sat_type = RUSSIAN_MILITARY_NORAD[norad]
+            tle_line1 = (sat.get("TLE_LINE1") or "").strip()
+            tle_line2 = (sat.get("TLE_LINE2") or "").strip()
+            if not tle_line1 or not tle_line2:
+                continue
+            result[friendly_name] = {
+                "norad_id": int(norad),
+                "type": sat_type,
+                "tle_line_1": tle_line1,
+                "tle_line_2": tle_line2,
+                "origin": "russian",
+            }
+
         return result
 
     async def _fetch_from_celestrak(self, client: httpx.AsyncClient) -> dict[str, dict[str, Any]]:
@@ -326,6 +406,57 @@ class SatelliteTleAdapter(SourceAdapter):
             return round(lat, 4), round(lon, 4), round(alt, 1)
         except Exception:
             return None
+
+    def compute_ground_track(
+        self,
+        tle_line1: str,
+        tle_line2: str,
+        start: datetime,
+        hours: float = 8.0,
+        step_seconds: int = 60,
+    ) -> list[dict[str, Any]]:
+        """Return a list of {lat, lon, alt_km, t_iso} points propagated forward from start."""
+        try:
+            satrec = Satrec.twoline2rv(tle_line1, tle_line2)
+        except Exception:
+            return []
+
+        points: list[dict[str, Any]] = []
+        total_steps = int(hours * 3600 / step_seconds)
+        prev_lon: float | None = None
+
+        for i in range(total_steps):
+            t = start.timestamp() + i * step_seconds
+            dt = datetime.fromtimestamp(t, tz=timezone.utc)
+            jd, fr = jday(dt.year, dt.month, dt.day, dt.hour, dt.minute,
+                          dt.second + dt.microsecond / 1e6)
+            try:
+                e, r, _ = satrec.sgp4(jd, fr)
+                if e != 0 or r is None:
+                    continue
+                T = (jd + fr - 2451545.0) / 36525.0
+                gmst_sec = (67310.54841 + (876600 * 3600 + 8640184.812866) * T
+                            + 0.093104 * T ** 2 - 6.2e-6 * T ** 3) % 86400.0
+                gmst = math.radians(gmst_sec / 240.0)
+                x = r[0] * math.cos(gmst) + r[1] * math.sin(gmst)
+                y = -r[0] * math.sin(gmst) + r[1] * math.cos(gmst)
+                z = r[2]
+                lon = round(math.degrees(math.atan2(y, x)), 3)
+                lat = round(math.degrees(math.atan2(z, math.sqrt(x ** 2 + y ** 2))), 3)
+                alt = round(math.sqrt(x ** 2 + y ** 2 + z ** 2) - 6371.0, 1)
+                # Mark anti-meridian crossings so the frontend can split the line
+                crossing = prev_lon is not None and abs(lon - prev_lon) > 180
+                points.append({
+                    "lat": lat, "lon": lon, "alt_km": alt,
+                    "t_iso": dt.isoformat(),
+                    "t_unix": int(t),
+                    "crossing": crossing,
+                })
+                prev_lon = lon
+            except Exception:
+                continue
+
+        return points
 
     def _build_summary(self, area: str, satellite_info: dict[str, Any]) -> str:
         count = len(satellite_info)

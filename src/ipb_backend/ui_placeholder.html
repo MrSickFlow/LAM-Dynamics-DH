@@ -1650,6 +1650,7 @@
 
     const SATELLITE_COLLECTIONS = [
       { id: "satellites", label: "Satellites", color: "#195d85" },
+      { id: "satellite-tracks", label: "Russian Ground Tracks (8h)", color: "#c0392b" },
     ];
 
     const BRIDGE_COLLECTIONS = [
@@ -1690,7 +1691,7 @@
       },
       {
         name: "Satellites",
-        ids: ["satellites"],
+        ids: ["satellites", "satellite-tracks"],
       },
       {
         name: "Weather",
@@ -1701,7 +1702,7 @@
 
     const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites", "digitraffic-road-surface"];
     const CUSTOM_LOAD_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "osm-poi"];
-    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-logistics", "poi-ports_terminals", "poi-forest", "poi-religion"]);
+    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "satellite-tracks", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-logistics", "poi-ports_terminals", "poi-forest", "poi-religion"]);
 
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
@@ -1742,6 +1743,7 @@
       "poi-power_infrastructure": { color: "#f0a500", weight: 1.5, fill: false, opacity: 0.75 },
       celltowers: { point: true, color: "#888" },
       satellites: { point: true, color: "#195d85" },
+      "satellite-tracks": { color: "#c0392b", weight: 2, fill: false, opacity: 0.85 },
       bridges: { color: "#c46c32", weight: 2.5, fill: false },
       tunnels: { color: "#8b4513", weight: 2.5, fill: false, dashArray: "8,4" },
       "road-surface": { point: true, color: "#c4a832" },
@@ -2272,6 +2274,7 @@
       // Cell & Satellites
       celltowers:             "Mobile network mast locations from OpenCelliD. Indicates communications infrastructure coverage. Loss of towers degrades civilian and some military communications.",
       satellites:             "Reconnaissance and imaging satellites with real-time positions computed from TLE orbital data (SGP4). Each dot shows where the satellite is right now. Click for NORAD ID, altitude, type and next predicted pass over the area.",
+      "satellite-tracks":    "Russian satellite ground track corridors for the next 8 hours. Red lines = optical imaging (requires daylight + clear sky). Amber = SAR (all-weather, day/night). Each line shows the exact strip of ground the sensor will sweep — avoid exposure or movement when the track crosses your position.",
       // Bridges & Tunnels
       bridges:                "Bridges and underpasses from Digiroad with load data: max mass (t), axle load (t), height clearance (m) and width (m). Critical for route planning with heavy vehicles.",
       tunnels:                "Road tunnels from Digiroad. Shown with dashed lines. Single points of failure for road corridors — high vulnerability to disruption.",
@@ -2456,6 +2459,46 @@
       } catch (error) {
         console.error("Satellite map data load failed:", error);
         setLayerAvailability(["satellites"], false, "Satellite overlays could not be refreshed.");
+      }
+    }
+
+    async function loadSatelliteTrackData() {
+      try {
+        const response = await fetch(`/api/map-data/satellite-tracks?area=${encodeURIComponent(getWorkspaceArea())}&hours=8`);
+        const geojson = await response.json();
+        state.collectionLayers["satellite-tracks"]?.clearLayers();
+        if (geojson.available === false) {
+          setLayerAvailability(["satellite-tracks"], false, "Ground track data unavailable.");
+          return;
+        }
+        setLayerAvailability(["satellite-tracks"], true);
+        geojson.features.forEach((feature) => {
+          const layer = state.collectionLayers["satellite-tracks"];
+          if (!layer) return;
+          const props = feature.properties || {};
+          const satType = props.type || "";
+          // SAR satellites shown in amber (all-weather threat); optical in red
+          const isSar = satType.toLowerCase().includes("sar");
+          const lineColor = isSar ? "#e67e22" : "#c0392b";
+          // Draw swath corridor as a semi-transparent polygon alongside the track line
+          L.geoJSON(feature, {
+            style: { color: lineColor, weight: 2.5, opacity: 0.9, fill: false },
+            onEachFeature: (feat, layerRef) => {
+              const p = feat.properties || {};
+              const start = p.track_start_utc ? new Date(p.track_start_utc).toUTCString().replace(" GMT","Z") : "?";
+              const end   = p.track_end_utc   ? new Date(p.track_end_utc).toUTCString().replace(" GMT","Z") : "?";
+              const sarNote = isSar ? "<br><b style='color:#e67e22'>⚠ SAR — all-weather, day/night imaging</b>" : "<br><b style='color:#c0392b'>⚠ Optical — requires daylight &amp; clear sky</b>";
+              layerRef.bindPopup(
+                `<b>${p.name}</b><br>${p.type}${sarNote}<br><small>Track: ${start}</small><br><small>to: ${end}</small>`
+              );
+            },
+          }).addTo(layer);
+        });
+        const checkbox = document.querySelector('input[data-collection="satellite-tracks"]');
+        if (!checkbox || checkbox.checked) state.collectionLayers["satellite-tracks"]?.addTo(state.map);
+      } catch (error) {
+        console.error("Satellite track load failed:", error);
+        setLayerAvailability(["satellite-tracks"], false, "Ground track data unavailable.");
       }
     }
 
@@ -3376,7 +3419,7 @@
         const loaders = [loadMapData()];
         if (sourceIds.has("osm-poi")) loaders.push(loadPoiMapData());
         if (sourceIds.has("opencellid")) loaders.push(loadCellTowerMapData());
-        if (sourceIds.has("satellites")) loaders.push(loadSatelliteMapData());
+        if (sourceIds.has("satellites")) loaders.push(loadSatelliteMapData(), loadSatelliteTrackData());
         if (sourceIds.has("digiroad")) loaders.push(loadBridgeMapData());
         if (sourceIds.has("digitraffic-road-surface")) loaders.push(loadRoadSurfaceMapData());
         await Promise.all(loaders);

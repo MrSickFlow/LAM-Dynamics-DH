@@ -750,6 +750,7 @@ async def map_data_satellites(area: str = Query("North Karelia"), services=Depen
                 "next_pass": next_pass.get("pass_time_utc", ""),
                 "altitude_km": next_pass.get("altitude_km", ""),
                 "has_position": "current_lat" in info,
+                "origin": info.get("origin", "other"),
             },
         })
     return {
@@ -757,6 +758,83 @@ async def map_data_satellites(area: str = Query("North Karelia"), services=Depen
         "features": features,
         "available": True,
         "message": f"Tracking {len(features)} reconnaissance/imaging satellites",
+    }
+
+
+@router.get("/map-data/satellite-tracks")
+async def map_data_satellite_tracks(
+    area: str = Query("North Karelia"),
+    hours: float = Query(8.0, description="Hours to project ground tracks forward"),
+    services=Depends(get_services),
+):
+    """Ground track corridors for Russian satellites — the core concealment planning layer."""
+    from ipb_backend.ingestion.sources.satellites import SatelliteTleAdapter
+    from datetime import datetime, timezone
+
+    records = services["ingestion_service"].records
+    record = _record_for_area_or_latest(records, "satellites", area)
+    if record is None:
+        return {"type": "FeatureCollection", "features": [], "available": False}
+
+    satellites = record.data.get("satellites", {})
+    adapter = services["adapters"].get("satellites")
+    if not isinstance(adapter, SatelliteTleAdapter):
+        return {"type": "FeatureCollection", "features": [], "available": False}
+
+    now = datetime.now(timezone.utc)
+    features = []
+
+    for name, info in satellites.items():
+        if info.get("origin") != "russian":
+            continue
+        tle1 = info.get("tle_line_1", "")
+        tle2 = info.get("tle_line_2", "")
+        if not tle1 or not tle2:
+            continue
+
+        points = adapter.compute_ground_track(tle1, tle2, now, hours=hours)
+        if not points:
+            continue
+
+        # Split into segments at anti-meridian crossings
+        segments: list[list[list[float]]] = []
+        current: list[list[float]] = []
+        for pt in points:
+            if pt.get("crossing") and current:
+                segments.append(current)
+                current = []
+            current.append([pt["lon"], pt["lat"]])
+        if current:
+            segments.append(current)
+
+        # One feature per continuous segment
+        for seg_coords in segments:
+            if len(seg_coords) < 2:
+                continue
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": seg_coords},
+                "properties": {
+                    "_collection": "satellite-tracks",
+                    "name": name,
+                    "type": info.get("type", ""),
+                    "norad_id": info.get("norad_id"),
+                    "track_start_utc": points[0]["t_iso"],
+                    "track_end_utc": points[-1]["t_iso"],
+                    "track_hours": hours,
+                    # Attach full time series for hover tooltips
+                    "points": [
+                        {"lat": p["lat"], "lon": p["lon"], "t_iso": p["t_iso"], "t_unix": p["t_unix"]}
+                        for p in points if not p.get("crossing")
+                    ],
+                },
+            })
+
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "available": True,
+        "russian_count": sum(1 for f in features if f["properties"].get("name")),
     }
 
 
