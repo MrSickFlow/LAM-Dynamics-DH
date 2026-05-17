@@ -837,12 +837,18 @@
       margin-bottom: 12px;
     }
 
+    #chat-section .section-body {
+      display: flex;
+      flex-direction: column;
+      max-height: 600px;
+    }
+
     .chat-thread {
       display: flex;
       flex-direction: column;
       gap: 12px;
-      min-height: 320px;
-      max-height: 420px;
+      min-height: 120px;
+      flex: 1 1 auto;
       overflow-y: auto;
       padding-right: 4px;
       margin-top: 12px;
@@ -915,6 +921,7 @@
       grid-template-columns: 1fr auto;
       gap: 10px;
       margin-top: 14px;
+      flex-shrink: 0;
     }
 
     .chat-input {
@@ -1793,8 +1800,7 @@
     ];
 
     const SATELLITE_COLLECTIONS = [
-      { id: "satellites", label: "Satellites", color: "#195d85" },
-      { id: "satellite-tracks", label: "Russian Ground Tracks (8h)", color: "#c0392b" },
+      { id: "satellite-tracks", label: "Russian Satellites (8h)", color: "#c0392b" },
     ];
 
     const BRIDGE_COLLECTIONS = [
@@ -1835,7 +1841,7 @@
       },
       {
         name: "Satellites",
-        ids: ["satellites", "satellite-tracks"],
+        ids: ["satellite-tracks"],
       },
       {
         name: "Weather",
@@ -1848,8 +1854,8 @@
     // a specific area — keep it out of the named-area ingest, add it in the
     // bbox ingest so it activates once the user draws a load rectangle.
     const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "digitraffic-road-surface"];
-    const CUSTOM_LOAD_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "osm-poi", "satellites"];
-    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "satellite-tracks", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-logistics", "poi-ports_terminals", "poi-forest", "poi-religion"]);
+    const CUSTOM_LOAD_SOURCE_IDS = ["fmi", "nls", "digiroad", "satellites", "digitraffic-road-surface"];
+    const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellite-tracks", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-logistics", "poi-ports_terminals", "poi-forest", "poi-religion"]);
 
     const COLL_STYLE = {
       tieviiva: { color: "#c46c32", weight: 2, fill: false },
@@ -2685,6 +2691,35 @@
       }
     }
 
+    function _clipTracksToBbox(geojson, bbox) {
+      if (!bbox) return geojson;
+      const [w, s, e, n] = bbox;
+      const inside = ([lon, lat]) => lon >= w && lon <= e && lat >= s && lat <= n;
+
+      const clipped = [];
+      for (const feat of geojson.features || []) {
+        if (feat.geometry?.type === "Point") {
+          // Keep time-label points only if inside bbox
+          if (inside(feat.geometry.coordinates)) clipped.push(feat);
+          continue;
+        }
+        if (feat.geometry?.type !== "LineString") { clipped.push(feat); continue; }
+        // Split the line into segments that stay inside the bbox
+        const coords = feat.geometry.coordinates;
+        let seg = [];
+        for (const pt of coords) {
+          if (inside(pt)) {
+            seg.push(pt);
+          } else {
+            if (seg.length >= 2) clipped.push({ ...feat, geometry: { type: "LineString", coordinates: seg } });
+            seg = [];
+          }
+        }
+        if (seg.length >= 2) clipped.push({ ...feat, geometry: { type: "LineString", coordinates: seg } });
+      }
+      return { ...geojson, features: clipped };
+    }
+
     async function loadSatelliteTrackData() {
       try {
         const tf = encodeURIComponent(state.timeframe || "24h");
@@ -2698,7 +2733,8 @@
         setLayerAvailability(["satellite-tracks"], true);
         const layer = state.collectionLayers["satellite-tracks"];
         if (!layer) return;
-        layer.addData(geojson);
+        const bbox = state.loadTarget?.kind === "bbox" ? state.loadTarget.bbox_wgs84 : null;
+        layer.addData(_clipTracksToBbox(geojson, bbox));
         const checkbox = document.querySelector('input[data-collection="satellite-tracks"]');
         if (!checkbox || checkbox.checked) layer.addTo(state.map);
       } catch (error) {
@@ -3749,68 +3785,73 @@
         if (!ingestResponse.ok) {
           throw new Error(`Workspace ingest failed with ${ingestResponse.status}`);
         }
-        // Ingest returns 202 immediately and runs in the background.
-        // Poll /api/sources every 500ms until all enabled sources leave "idle" state (max 150s).
+
         const enabledIds = new Set((await ingestResponse.json()).source_ids || []);
+
+        // Map each source to the overlay loader(s) it feeds.
+        const SOURCE_LOADERS = {
+          "nls":                    () => [loadMapData()],
+          "fmi":                    () => { renderWeather(); return []; },
+          "digiroad":               () => [loadBridgeMapData()],
+          "satellites":             () => [loadSatelliteMapData(), loadSatelliteTrackData()],
+          "opencellid":             () => [loadCellTowerMapData()],
+          "osm-poi":                () => [loadPoiMapData()],
+          "digitraffic-road-surface": () => [loadRoadSurfaceMapData()],
+          "statistics-finland":     () => [],
+        };
+
+        // Initialise UI immediately so overlays/agents/freshness render as data arrives.
+        const [weatherResp, sourcesResp, healthResp] = await Promise.all([
+          fetch(`/api/weather/current?area=${encodeURIComponent(getWorkspaceArea())}`),
+          fetch("/api/sources"),
+          fetch("/api/analysis/health"),
+        ]);
+        state.sources = sourcesResp.ok ? await sourcesResp.json() : [];
+        state.weatherRecord = weatherResp.ok ? (await weatherResp.json()).record || null : null;
+        state.analysisHealth = healthResp.ok ? await healthResp.json() : { provider: "unknown", status: "error" };
+        renderOverlays();
+        renderAgentButtons();
+        renderWeather();
+        renderFreshness(state.sources);
+
+        // Progressive poll: fire each source's overlay loader as soon as it turns ready.
+        const launched = new Set();
+        const overlayPromises = [];
         const deadline = Date.now() + 150_000;
+
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 500));
           const pollResp = await fetch("/api/sources");
           if (!pollResp.ok) break;
           const sources = await pollResp.json();
-          const allDone = sources
-            .filter(s => enabledIds.has(s.source_id))
-            .every(s => s.status !== "idle" && s.status !== "running");
+          state.sources = sources;
+
+          let doneCount = 0;
+          for (const s of sources) {
+            if (!enabledIds.has(s.source_id)) continue;
+            const isDone = s.status !== "idle" && s.status !== "running";
+            if (isDone) doneCount++;
+            if (isDone && !launched.has(s.source_id)) {
+              launched.add(s.source_id);
+              const loaderFn = SOURCE_LOADERS[s.source_id];
+              if (loaderFn) overlayPromises.push(...loaderFn());
+            }
+          }
+
+          const allDone = doneCount === enabledIds.size;
+          if (!allDone) {
+            statusLine.innerHTML = `<span class="status-spinner"></span>Loading… ${doneCount}/${enabledIds.size} sources ready`;
+          }
           if (allDone) break;
-          const ready = sources.filter(s => enabledIds.has(s.source_id) && s.status === "ready").length;
-          statusLine.innerHTML = `<span class="status-spinner"></span>Loading sources… ${ready}/${enabledIds.size} ready`;
-        }
-      } catch (error) {
-        console.error("Ingest failed:", error);
-        statusLine.classList.remove("is-loading");
-        statusLine.textContent = error.message?.includes("Failed to fetch")
-          ? "Server unreachable — is uvicorn running? (PYTHONPATH=src uvicorn ipb_backend.main:app)"
-          : "Workspace refresh failed.";
-      }
-
-      try {
-        const workspaceArea = getWorkspaceArea();
-        const [weatherResponse, sourcesResponse, analysisHealthResponse] = await Promise.all([
-          fetch(`/api/weather/current?area=${encodeURIComponent(workspaceArea)}`),
-          fetch("/api/sources"),
-          fetch("/api/analysis/health"),
-        ]);
-
-        if (!weatherResponse.ok || !sourcesResponse.ok) {
-          throw new Error("Workspace data requests failed");
         }
 
-        const weatherPayload = await weatherResponse.json();
-        state.sources = await sourcesResponse.json();
-        state.analysisHealth = analysisHealthResponse.ok ? await analysisHealthResponse.json() : {
-          provider: "unknown",
-          status: "error",
-          error: `Analysis health failed with ${analysisHealthResponse.status}`,
-        };
-        state.weatherRecord = weatherPayload.record || null;
-
-        renderOverlays();
-        renderAgentButtons();
-        renderWeather();
+        // Wait for any in-flight overlay fetches, then inspect.
+        await Promise.all(overlayPromises);
         renderFreshness(state.sources);
-        const sourceIds = new Set(currentSourceIds());
-        const loaders = [loadMapData()];
-        if (sourceIds.has("osm-poi")) loaders.push(loadPoiMapData());
-        if (sourceIds.has("opencellid")) loaders.push(loadCellTowerMapData());
-        if (sourceIds.has("satellites")) loaders.push(loadSatelliteMapData(), loadSatelliteTrackData());
-        if (sourceIds.has("digiroad")) loaders.push(loadBridgeMapData());
-        if (sourceIds.has("digitraffic-road-surface")) loaders.push(loadRoadSurfaceMapData());
-        await Promise.all(loaders);
 
         if (state.selectionGeometry) {
           await inspectSelection(state.selectionGeometry);
         } else if (state.loadTarget?.kind === "bbox" && state.loadTarget.bbox_wgs84) {
-          // Auto-inspect the loaded rectangle so the panel is immediately populated.
           const [w, s, e, n] = state.loadTarget.bbox_wgs84;
           const bboxGeometry = {
             type: "Polygon",
@@ -3823,17 +3864,16 @@
           statusLine.textContent = "Datasets ready. Shift + drag on the map to inspect an AOI.";
         }
       } catch (error) {
-        console.error(error);
+        console.error("Load failed:", error);
         statusLine.classList.remove("is-loading");
-        if (!statusLine.textContent.includes("refresh failed")) {
-          statusLine.textContent = "Could not load workspace data. Is the server running?";
-        }
+        statusLine.textContent = error.message?.includes("Failed to fetch")
+          ? "Server unreachable — is uvicorn running? (PYTHONPATH=src uvicorn ipb_backend.main:app)"
+          : "Workspace refresh failed.";
       } finally {
         state.isLoading = false;
         statusLine.classList.remove("is-loading");
         refreshBtn.disabled = false;
         refreshBtn.textContent = "Load Data";
-        // If the user changed timeframe while we were loading, run again now.
         if (_pendingReload) {
           _pendingReload = false;
           bootstrapWorkspace();
