@@ -183,15 +183,6 @@ def build_raw_sections(raw_data: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             )
 
-        subsections.append(
-            {
-                "id": "full-payload",
-                "title": "Full Payload",
-                "kind": "json",
-                "data": payload,
-            }
-        )
-
         sections.append(
             {
                 "source_id": source_id,

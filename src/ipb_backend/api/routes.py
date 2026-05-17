@@ -601,6 +601,7 @@ def _build_freshness(services, latest_records):
 # TTL matches the fastest-refreshing source (FMI = 900 s) so cached results
 # are never staler than a fresh ingest would produce.
 _AOI_CACHE_TTL_S = 120.0
+_AOI_CACHE_MAX_ENTRIES = 8
 _aoi_cache: dict[str, tuple[float, Any]] = {}  # key → (expires_at, result)
 
 
@@ -614,9 +615,20 @@ def _aoi_cache_key(request: AoiInspectionRequest) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def _prune_aoi_cache(now: float) -> None:
+    expired_keys = [key for key, (expires_at, _) in _aoi_cache.items() if expires_at <= now]
+    for key in expired_keys:
+        _aoi_cache.pop(key, None)
+
+    while len(_aoi_cache) > _AOI_CACHE_MAX_ENTRIES:
+        oldest_key = next(iter(_aoi_cache))
+        _aoi_cache.pop(oldest_key, None)
+
+
 def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], DataPackage]:
     cache_key = _aoi_cache_key(request)
     now = time.monotonic()
+    _prune_aoi_cache(now)
     cached = _aoi_cache.get(cache_key)
     if cached is not None and cached[0] > now:
         return cached[1]
@@ -670,6 +682,7 @@ def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[s
     )
     result = (selection, raw_data, freshness, metrics, evidence_bundle, data_package)
     _aoi_cache[cache_key] = (now + _AOI_CACHE_TTL_S, result)
+    _prune_aoi_cache(now)
     return result
 
 

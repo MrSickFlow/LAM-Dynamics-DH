@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
+from ipb_backend.api import routes as api_routes
 from ipb_backend.analysis.analyzers import OllamaAnalyzer
 from ipb_backend.ingestion.sources.digiroad import DigiroadAdapter
 from ipb_backend.ingestion.sources.fmi import FmiAdapter
@@ -616,6 +617,87 @@ def test_aoi_inspection_includes_additional_feature_sources():
     assert any(item["source_id"] == "custom-infra" for item in payload["freshness"])
     assert any(item["source_id"] == "custom-infra" for item in payload["agent"]["evidence_bundle"])
     assert any(item["source_id"] == "custom-infra" for item in payload["data_package"]["source_summaries"])
+
+
+def test_aoi_inspection_raw_sections_do_not_duplicate_full_payload():
+    state["ingestion_service"]._records.clear()
+    api_routes._aoi_cache.clear()
+    state["ingestion_service"]._records.extend(
+        [
+            DatasetRecord(
+                source_id="custom-infra",
+                category=SourceCategory.INFRASTRUCTURE,
+                area="North Karelia",
+                timeframe="72h",
+                summary="Custom infrastructure record",
+                data={
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Point", "coordinates": [30.35, 62.62]},
+                            "properties": {"name": "Tower site", "status": "active"},
+                        }
+                    ]
+                },
+            )
+        ]
+    )
+
+    response = client.post(
+        "/api/aoi/inspect",
+        json={
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[30.0, 62.4], [30.6, 62.4], [30.6, 62.85], [30.0, 62.85], [30.0, 62.4]]],
+            },
+            "timeframe": "72h",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    subsections = payload["raw_sections"][0]["subsections"]
+    assert all(section["id"] != "full-payload" for section in subsections)
+
+
+def test_aoi_snapshot_cache_is_bounded():
+    state["ingestion_service"]._records.clear()
+    api_routes._aoi_cache.clear()
+    state["ingestion_service"]._records.append(
+        DatasetRecord(
+            source_id="custom-infra",
+            category=SourceCategory.INFRASTRUCTURE,
+            area="North Karelia",
+            timeframe="72h",
+            summary="Custom infrastructure record",
+            data={
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [30.35, 62.62]},
+                        "properties": {"name": "Tower site"},
+                    }
+                ]
+            },
+        )
+    )
+
+    for offset in range(api_routes._AOI_CACHE_MAX_ENTRIES + 3):
+        west = 30.0 + (offset * 0.01)
+        east = west + 0.05
+        response = client.post(
+            "/api/aoi/data-package",
+            json={
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[west, 62.4], [east, 62.4], [east, 62.45], [west, 62.45], [west, 62.4]]],
+                },
+                "timeframe": "72h",
+            },
+        )
+        assert response.status_code == 200
+
+    assert len(api_routes._aoi_cache) <= api_routes._AOI_CACHE_MAX_ENTRIES
 
 SAMPLE_OPENCELLID_RECORD = DatasetRecord(
     source_id="opencellid",
