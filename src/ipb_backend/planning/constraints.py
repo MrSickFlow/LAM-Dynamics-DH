@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
+from numbers import Integral
 from typing import Any, Iterable, Optional
 
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import nearest_points
 from shapely.strtree import STRtree
 
 from ipb_backend.models import DatasetRecord
@@ -58,6 +60,13 @@ class CellFeatures:
         "population_estimate",
         "nearest_poi_km",
         "nearest_road_km",
+        "water_coverage_ratio",
+        "bog_coverage_ratio",
+        "rocky_coverage_ratio",
+        "forest_vegetation_coverage_ratio",
+        "agricultural_coverage_ratio",
+        "contour_count",
+        "contour_span_m",
     )
 
     def __init__(self) -> None:
@@ -80,6 +89,13 @@ class CellFeatures:
         self.population_estimate: int = 0
         self.nearest_poi_km: Optional[float] = None
         self.nearest_road_km: Optional[float] = None
+        self.water_coverage_ratio: Optional[float] = None
+        self.bog_coverage_ratio: Optional[float] = None
+        self.rocky_coverage_ratio: Optional[float] = None
+        self.forest_vegetation_coverage_ratio: Optional[float] = None
+        self.agricultural_coverage_ratio: Optional[float] = None
+        self.contour_count: int = 0
+        self.contour_span_m: Optional[float] = None
 
 
 _HIGH_CONCEALMENT = {("needleleaved", "evergreen"), ("mixed", "evergreen"), ("mixed", None)}
@@ -102,6 +118,10 @@ def _classify_forest(tags: dict[str, Any]) -> str:
 
 
 def _iter_digiroad_features(record: DatasetRecord, coll_id: str) -> Iterable[dict[str, Any]]:
+    return record.data.get("collections", {}).get(coll_id, {}).get("features", []) or []
+
+
+def _iter_nls_features(record: DatasetRecord, coll_id: str) -> Iterable[dict[str, Any]]:
     return record.data.get("collections", {}).get(coll_id, {}).get("features", []) or []
 
 
@@ -202,14 +222,21 @@ class _IndexedLayer:
         """Great-circle km from (lon, lat) to nearest feature's geometry."""
         if self.tree is None or not self.features:
             return None
-        idx = self.tree.nearest(Point(lon, lat))
-        if idx is None:
+        query_point = Point(lon, lat)
+        nearest = self.tree.nearest(query_point)
+        if nearest is None:
             return None
-        feat = self.features[int(idx)]
-        # For points, this is exact. For lines/polygons, use shapely's nearest
-        # point on the geometry (in degree space) then haversine — accurate
-        # for the small distances we care about.
-        nearest_geom_pt = feat.geom.interpolate(feat.geom.project(Point(lon, lat)))
+
+        # Shapely 2.x returns an integer index here; older releases returned
+        # the geometry object itself. Support both so planning stays stable
+        # across local environments.
+        nearest_geom = (
+            self.features[int(nearest)].geom if isinstance(nearest, Integral) else nearest
+        )
+        if nearest_geom.is_empty:
+            return None
+
+        _, nearest_geom_pt = nearest_points(query_point, nearest_geom)
         return haversine_km((lon, lat), (nearest_geom_pt.x, nearest_geom_pt.y))
 
 
@@ -225,10 +252,17 @@ class SourceIndex:
     bridges: _IndexedLayer = field(default_factory=_IndexedLayer)
     bridge_link_limits: dict[str, dict[str, Optional[float]]] = field(default_factory=dict)
     roads: _IndexedLayer = field(default_factory=_IndexedLayer)
+    waters: _IndexedLayer = field(default_factory=_IndexedLayer)
+    bogs: _IndexedLayer = field(default_factory=_IndexedLayer)
+    rocky_areas: _IndexedLayer = field(default_factory=_IndexedLayer)
+    forest_vegetation: _IndexedLayer = field(default_factory=_IndexedLayer)
+    agricultural_land: _IndexedLayer = field(default_factory=_IndexedLayer)
+    contours: _IndexedLayer = field(default_factory=_IndexedLayer)
     forests: _IndexedLayer = field(default_factory=_IndexedLayer)
     other_pois: _IndexedLayer = field(default_factory=_IndexedLayer)
     cell_towers: _IndexedLayer = field(default_factory=_IndexedLayer)
     population: _IndexedLayer = field(default_factory=_IndexedLayer)
+    nls_available: bool = False
 
     # Weather is global (one station per ingest), so cache the latest readings.
     weather_temp_c: Optional[float] = None
@@ -251,6 +285,31 @@ class SourceIndex:
             idx.roads = _IndexedLayer.from_geojson_features(
                 _iter_digiroad_features(digiroad, "dr_leveys")
             )
+
+        nls = records.get("nls")
+        if nls is not None:
+            idx.nls_available = True
+            water_features: list[dict[str, Any]] = []
+            for coll_id in ("jarvi", "meri", "virtavesialue"):
+                water_features.extend(_iter_nls_features(nls, coll_id))
+            idx.waters = _IndexedLayer.from_geojson_features(water_features)
+            idx.bogs = _IndexedLayer.from_geojson_features(_iter_nls_features(nls, "suo"))
+            idx.rocky_areas = _IndexedLayer.from_geojson_features(
+                _iter_nls_features(nls, "kallioalue")
+            )
+            idx.forest_vegetation = _IndexedLayer.from_geojson_features(
+                _iter_nls_features(nls, "metsamaankasvillisuus")
+            )
+            idx.agricultural_land = _IndexedLayer.from_geojson_features(
+                _iter_nls_features(nls, "maatalousmaa")
+            )
+            idx.contours = _IndexedLayer.from_geojson_features(
+                _iter_nls_features(nls, "korkeuskayra")
+            )
+            if not idx.roads.features:
+                idx.roads = _IndexedLayer.from_geojson_features(
+                    _iter_nls_features(nls, "tieviiva")
+                )
 
         osm = records.get("osm-poi")
         if osm is not None:
@@ -293,9 +352,12 @@ class SourceIndex:
             idx.weather_humidity_pct = _latest("humidity")
 
         logger.debug(
-            "planning index built: bridges=%d roads=%d forests=%d pois=%d towers=%d pop=%d",
+            "planning index built: bridges=%d roads=%d waters=%d contours=%d vegetation=%d forests=%d pois=%d towers=%d pop=%d",
             len(idx.bridges.features),
             len(idx.roads.features),
+            len(idx.waters.features),
+            len(idx.contours.features),
+            len(idx.forest_vegetation.features),
             len(idx.forests.features),
             len(idx.other_pois.features),
             len(idx.cell_towers.features),
@@ -307,6 +369,20 @@ class SourceIndex:
 # ---------------------------------------------------------------------------
 # Per-cell extraction (uses pre-built indexes; no per-cell re-shapification)
 # ---------------------------------------------------------------------------
+
+
+def _layer_coverage_ratio(layer: _IndexedLayer, cell: BaseGeometry) -> float:
+    if not layer.features or cell.area <= 0:
+        return 0.0
+    covered = 0.0
+    for feat in layer.query_intersecting(cell):
+        if feat.geom.area <= 0:
+            continue
+        try:
+            covered += feat.geom.intersection(cell).area / cell.area
+        except Exception:
+            continue
+    return min(1.0, covered)
 
 
 def extract_cell_features_indexed(
@@ -349,6 +425,24 @@ def extract_cell_features_indexed(
 
     # Nearest road (true point-on-geometry distance, not centroid-to-centroid)
     features.nearest_road_km = index.roads.nearest_distance_km(centroid_lon, centroid_lat)
+
+    if index.nls_available:
+        features.water_coverage_ratio = _layer_coverage_ratio(index.waters, cell)
+        features.bog_coverage_ratio = _layer_coverage_ratio(index.bogs, cell)
+        features.rocky_coverage_ratio = _layer_coverage_ratio(index.rocky_areas, cell)
+        features.forest_vegetation_coverage_ratio = _layer_coverage_ratio(index.forest_vegetation, cell)
+        features.agricultural_coverage_ratio = _layer_coverage_ratio(index.agricultural_land, cell)
+        contour_elevations: list[float] = []
+        for contour in index.contours.query_intersecting(cell):
+            features.contour_count += 1
+            elevation = contour.props.get("korkeus")
+            try:
+                contour_elevations.append(float(elevation))
+            except (TypeError, ValueError):
+                continue
+        features.contour_span_m = (
+            max(contour_elevations) - min(contour_elevations) if contour_elevations else 0.0
+        )
 
     # Forest points inside the cell → concealment counts
     for forest in index.forests.query_within(cell):
@@ -420,6 +514,19 @@ def check_constraints(
     force: ForceComposition,
 ) -> list[ConstraintMatch]:
     matches: list[ConstraintMatch] = []
+
+    if cell_features.water_coverage_ratio is not None:
+        land_ratio = 1.0 - cell_features.water_coverage_ratio
+        passed = land_ratio >= 0.55
+        matches.append(
+            ConstraintMatch(
+                name="dry_land",
+                passed=passed,
+                observed=round(land_ratio, 2),
+                required=0.55,
+                detail=f"Dry land coverage {land_ratio:.2f} vs required 0.55",
+            )
+        )
 
     heaviest = force.heaviest_vehicle_t
     if heaviest > 0 and cell_features.min_bridge_capacity_t is not None:

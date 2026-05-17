@@ -17,6 +17,7 @@ from ipb_backend.planning import (
 )
 from ipb_backend.planning.constraints import CellFeatures, check_constraints
 from ipb_backend.planning.operations import SCORING_CRITERIA, get_operation_profile
+from ipb_backend.planning.suitability import _score_components, _weighted_score
 
 
 client = TestClient(app)
@@ -168,7 +169,7 @@ def test_priority_adjustment_renormalizes():
     assert abs(sum(weights.values()) - 1.0) < 1e-6
     base_defensive = OPERATION_PROFILES[OperationType.DEFENSIVE]
     assert weights["concealment"] > base_defensive["concealment"]
-    assert weights["road_access"] < base_defensive["road_access"]
+    assert weights["route_resilience"] < base_defensive["route_resilience"]
 
 
 def test_constraint_match_bridge_weight_passes_and_fails():
@@ -205,6 +206,16 @@ def test_constraint_match_drone_wind_uses_gust_when_available():
     wind_match = next(m for m in matches if m.name == "drone_wind")
     assert wind_match.passed is False
     assert wind_match.observed == 14.0
+
+
+def test_constraint_match_rejects_water_dominated_cells():
+    features = CellFeatures()
+    features.water_coverage_ratio = 0.7
+
+    matches = check_constraints(features, _sample_force())
+    land_match = next(m for m in matches if m.name == "dry_land")
+    assert land_match.passed is False
+    assert land_match.observed == 0.3
 
 
 def test_recommend_sites_runs_without_ingested_data():
@@ -258,6 +269,111 @@ def test_recommend_sites_marks_unfeasible_when_wind_exceeds_drone_limit():
     assert top.feasible is False
     failed_names = [m.name for m in top.constraint_matches if not m.passed]
     assert "drone_wind" in failed_names
+
+
+def test_offensive_prefers_flatter_ground_while_defensive_prefers_relief_and_cover():
+    flat = CellFeatures()
+    flat.agricultural_coverage_ratio = 0.65
+    flat.forest_vegetation_coverage_ratio = 0.1
+    flat.water_coverage_ratio = 0.0
+    flat.bog_coverage_ratio = 0.0
+    flat.rocky_coverage_ratio = 0.0
+    flat.contour_count = 0
+    flat.contour_span_m = 0.0
+    flat.max_road_width_m = 8.0
+    flat.road_segment_count = 4
+    flat.nearest_road_km = 0.2
+    flat.min_bridge_capacity_t = 90.0
+    flat.weather_precip_mm = 0.2
+    flat.weather_cloud_pct = 35.0
+
+    hilly = CellFeatures()
+    hilly.agricultural_coverage_ratio = 0.05
+    hilly.forest_vegetation_coverage_ratio = 0.7
+    hilly.water_coverage_ratio = 0.0
+    hilly.bog_coverage_ratio = 0.05
+    hilly.rocky_coverage_ratio = 0.2
+    hilly.contour_count = 6
+    hilly.contour_span_m = 35.0
+    hilly.high_concealment_count = 3
+    hilly.medium_concealment_count = 1
+    hilly.max_road_width_m = 6.0
+    hilly.road_segment_count = 2
+    hilly.nearest_road_km = 0.6
+    hilly.min_bridge_capacity_t = 60.0
+    hilly.weather_precip_mm = 0.5
+    hilly.weather_cloud_pct = 70.0
+
+    offensive = _sample_operation(OperationType.OFFENSIVE)
+    defensive = _sample_operation(OperationType.DEFENSIVE)
+    offensive_weights = get_operation_profile(offensive)
+    defensive_weights = get_operation_profile(defensive)
+
+    flat_attack = _weighted_score(_score_components(flat, offensive, _sample_force()), offensive_weights)
+    hilly_attack = _weighted_score(_score_components(hilly, offensive, _sample_force()), offensive_weights)
+    flat_defense = _weighted_score(_score_components(flat, defensive, _sample_force()), defensive_weights)
+    hilly_defense = _weighted_score(_score_components(hilly, defensive, _sample_force()), defensive_weights)
+
+    assert flat_attack > hilly_attack
+    assert hilly_defense > flat_defense
+
+
+def test_route_resilience_penalizes_heavy_force_on_narrow_roads_in_bad_weather():
+    heavy_force = ForceComposition(
+        vehicles=[
+            Vehicle(
+                designation="Leopard 2A6",
+                count=10,
+                weight_t=62.0,
+                width_m=3.75,
+                height_m=3.0,
+                length_m=9.97,
+            )
+        ],
+        logistics_demand_t_per_day=25.0,
+    )
+
+    narrow_bad = CellFeatures()
+    narrow_bad.water_coverage_ratio = 0.0
+    narrow_bad.bog_coverage_ratio = 0.2
+    narrow_bad.max_road_width_m = 4.2
+    narrow_bad.road_segment_count = 1
+    narrow_bad.nearest_road_km = 0.1
+    narrow_bad.min_bridge_capacity_t = 35.0
+    narrow_bad.weather_precip_mm = 6.0
+    narrow_bad.weather_temp_c = 1.0
+
+    wide_good = CellFeatures()
+    wide_good.water_coverage_ratio = 0.0
+    wide_good.bog_coverage_ratio = 0.0
+    wide_good.max_road_width_m = 8.5
+    wide_good.road_segment_count = 4
+    wide_good.nearest_road_km = 0.1
+    wide_good.min_bridge_capacity_t = 90.0
+    wide_good.weather_precip_mm = 0.2
+    wide_good.weather_temp_c = 9.0
+
+    operation = _sample_operation(OperationType.OFFENSIVE)
+    narrow_components = _score_components(narrow_bad, operation, heavy_force)
+    wide_components = _score_components(wide_good, operation, heavy_force)
+
+    assert wide_components["route_resilience"] > narrow_components["route_resilience"]
+
+
+def test_recommend_sites_auto_coarsens_oversized_grid_requests():
+    request = PlanningRequest(
+        area="North Karelia",
+        force=_sample_force(),
+        operation=_sample_operation(),
+        grid_resolution_m=1000,
+        top_n=3,
+    )
+    response = recommend_sites(request, records=[])
+
+    assert response.cells_evaluated <= 20_000
+    assert response.grid_resolution_m > 1000
+    assert response.top_sites
+    assert any("Grid auto-coarsened" in note for note in response.notes)
 
 
 def test_planning_profiles_endpoint():
@@ -348,7 +464,7 @@ def test_fire_support_profile_in_operation_profiles():
     assert OperationType.FIRE_SUPPORT in OPERATION_PROFILES
     weights = OPERATION_PROFILES[OperationType.FIRE_SUPPORT]
     assert abs(sum(weights.values()) - 1.0) < 1e-6
-    assert weights["concealment"] >= 0.25
+    assert weights["terrain_fit"] >= 0.2
 
 
 def test_planning_recommend_endpoint_rejects_bad_geometry():

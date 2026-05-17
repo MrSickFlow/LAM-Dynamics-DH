@@ -560,7 +560,9 @@ def _clip_record_for_aoi(record: DatasetRecord, mask, source_name: Optional[str]
 
 def _build_freshness(services, latest_records):
     freshness = []
+    seen_source_ids = set()
     for source in services["registry"].list_sources():
+        seen_source_ids.add(source.source_id)
         record = latest_records.get(source.source_id)
         freshness.append(
             {
@@ -573,6 +575,23 @@ def _build_freshness(services, latest_records):
                 "retrieved_at": record.retrieved_at if record else None,
                 "refresh_interval_seconds": source.refresh_interval_seconds,
                 "freshness_label": "fresh" if record is not None and source.last_error is None else "stale",
+            }
+        )
+
+    for source_id, record in sorted(latest_records.items()):
+        if source_id in seen_source_ids:
+            continue
+        freshness.append(
+            {
+                "source_id": source_id,
+                "name": str(record.data.get("provider") or source_id),
+                "status": "ready",
+                "category": record.category.value,
+                "last_successful_refresh": record.retrieved_at,
+                "last_error": None,
+                "retrieved_at": record.retrieved_at,
+                "refresh_interval_seconds": None,
+                "freshness_label": "fresh",
             }
         )
     return freshness
@@ -615,9 +634,14 @@ def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[s
         definition.source_id: definition.name
         for definition in services["registry"].list_sources()
     }
+    latest_records = _latest_records_by_source(all_records)
+    candidate_source_ids = list(source_names)
+    candidate_source_ids.extend(
+        source_id for source_id in sorted(latest_records) if source_id not in source_names
+    )
 
     raw_data: dict[str, Any] = {}
-    for source_id in source_names:
+    for source_id in candidate_source_ids:
         record = _record_for_area_or_latest(all_records, source_id, request.area or None)
         if record is None:
             record = _record_for_area_or_latest(all_records, source_id)
@@ -626,10 +650,9 @@ def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[s
         raw_data[source_id] = _clip_record_for_aoi(
             record,
             mask,
-            source_name=source_names[source_id],
+            source_name=source_names.get(source_id) or str(record.data.get("provider") or source_id),
         )
 
-    latest_records = _latest_records_by_source(all_records)
     selection = {
         "geometry": request.geometry,
         "bounds": list(mask.bounds),

@@ -507,6 +507,7 @@ def test_aoi_inspection_includes_additional_feature_sources():
     assert payload["metrics"]["feature_counts_by_category"]["infrastructure"] == 1
     assert "custom-infra" in payload["metrics"]["active_sources"]
     assert any(section["source_id"] == "custom-infra" for section in payload["raw_sections"])
+    assert any(item["source_id"] == "custom-infra" for item in payload["freshness"])
     assert any(item["source_id"] == "custom-infra" for item in payload["agent"]["evidence_bundle"])
     assert any(item["source_id"] == "custom-infra" for item in payload["data_package"]["source_summaries"])
 
@@ -1185,6 +1186,7 @@ def test_aoi_data_package_endpoint_returns_normalized_contract():
     assert payload["schema_version"] == "1.0"
     assert payload["selection"]["selection_type"] == "geometry"
     assert payload["counts"]["by_source"]["custom-infra"] == 1
+    assert any(item["source_id"] == "custom-infra" for item in payload["source_freshness"])
     assert payload["source_summaries"][0]["provenance"]["deterministic"] is True
     assert payload["evidence_items"]
 

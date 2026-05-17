@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -23,6 +24,39 @@ def _load_target_key(load_target: Optional[LoadTarget]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
+def _record_storage_key(record: DatasetRecord) -> tuple[str, str, str]:
+    return (record.source_id, record.area, _load_target_key(record.load_target))
+
+
+class _RecordStore:
+    """Deduplicated record storage with list-like helpers for tests/admin use."""
+
+    def __init__(self) -> None:
+        self._by_key: dict[tuple[str, str, str], DatasetRecord] = {}
+
+    def __setitem__(self, key: tuple[str, str, str], record: DatasetRecord) -> None:
+        self._by_key[key] = record
+
+    def values(self):
+        return self._by_key.values()
+
+    def clear(self) -> None:
+        self._by_key.clear()
+
+    def append(self, record: DatasetRecord) -> None:
+        self._by_key[_record_storage_key(record)] = record
+
+    def extend(self, records: Iterable[DatasetRecord]) -> None:
+        for record in records:
+            self.append(record)
+
+    def __iter__(self) -> Iterator[DatasetRecord]:
+        return iter(self._by_key.values())
+
+    def __len__(self) -> int:
+        return len(self._by_key)
+
+
 class IngestionService:
     def __init__(self, registry: SourceRegistry, adapters: dict[str, SourceAdapter]) -> None:
         self._registry = registry
@@ -31,7 +65,7 @@ class IngestionService:
         # for the same scope overwrite rather than accumulate. Timeframe is
         # intentionally NOT part of the key — the latest record per scope wins,
         # which matches "Load Data" UX.
-        self._records: dict[tuple[str, str, str], DatasetRecord] = {}
+        self._records = _RecordStore()
 
     @property
     def records(self) -> list[DatasetRecord]:
@@ -49,14 +83,13 @@ class IngestionService:
             for source_id in source_ids
         ]
         records = [r for r in await asyncio.gather(*tasks) if r is not None]
-        lt_key = _load_target_key(request.load_target)
         for record in records:
-            self._records[(record.source_id, record.area, lt_key)] = record
+            self._records.append(record)
 
         # Rebuild spatial index so point-inspection queries stay O(log n).
         from ipb_backend.spatial import nearby_index
-        nearby_index.rebuild(list(self._records.values()))
 
+        nearby_index.rebuild(list(self._records.values()))
         return IngestionResult(requested_sources=source_ids, produced_records=records)
 
     async def _fetch_one_timed(self, source_id: str, area: str, timeframe: str, load_target=None):

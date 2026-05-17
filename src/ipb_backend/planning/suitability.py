@@ -19,6 +19,7 @@ from ipb_backend.planning.constraints import (
 from ipb_backend.planning.force_model import (
     ForceComposition,
     Operation,
+    OperationType,
     PlanningRequest,
     PlanningResponse,
     RecommendedSite,
@@ -67,31 +68,172 @@ def _build_cell_grid(
     return cells
 
 
+def _grid_dimensions(mask: BaseGeometry, resolution_m: int) -> tuple[int, int]:
+    minx, miny, maxx, maxy = mask.bounds
+    mean_lat = (miny + maxy) / 2.0
+    height_km = max(0.0, maxy - miny) * _DEG_LAT_KM
+    width_km = max(0.0, maxx - minx) * max(_deg_lon_km(mean_lat), 0.0001)
+    resolution_km = max(resolution_m, 1) / 1000.0
+    rows = max(1, math.ceil(height_km / resolution_km))
+    cols = max(1, math.ceil(width_km / resolution_km))
+    return rows, cols
+
+
+def _effective_grid_resolution(mask: BaseGeometry, requested_resolution_m: int) -> tuple[int, int]:
+    resolution_m = max(1, requested_resolution_m)
+    rows, cols = _grid_dimensions(mask, resolution_m)
+    estimated_cells = rows * cols
+    if estimated_cells <= PLANNING_MAX_CELLS:
+        return resolution_m, estimated_cells
+
+    # Scale the request to land under the hard cell budget using the AOI bbox as
+    # an upper bound. This avoids building an oversized grid only to reject it.
+    resolution_m = int(math.ceil(resolution_m * math.sqrt(estimated_cells / PLANNING_MAX_CELLS)))
+    while True:
+        rows, cols = _grid_dimensions(mask, resolution_m)
+        estimated_cells = rows * cols
+        if estimated_cells <= PLANNING_MAX_CELLS:
+            return resolution_m, estimated_cells
+        resolution_m += 1
+
+
 def _normalize(value: float, lo: float, hi: float) -> float:
     if hi <= lo:
         return 0.0
     return max(0.0, min(1.0, (value - lo) / (hi - lo)))
 
 
-def _score_components(features: CellFeatures, operation: Operation) -> dict[str, float]:
-    concealment_count = features.high_concealment_count + 0.5 * features.medium_concealment_count
-    concealment = _normalize(concealment_count, 0, 8)
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
 
-    cloud_bonus = _normalize(features.weather_cloud_pct or 0, 30, 90)
-    observation = max(
-        0.0,
-        min(
-            1.0,
-            0.6 * (1.0 - concealment) + 0.4 * cloud_bonus,
-        ),
+
+_RELIEF_TARGET = {
+    OperationType.OFFENSIVE: 0.15,
+    OperationType.DEFENSIVE: 0.85,
+    OperationType.RECON: 0.65,
+    OperationType.SCREEN: 0.70,
+    OperationType.LOGISTICS_HUB: 0.20,
+    OperationType.WITHDRAWAL: 0.30,
+    OperationType.FIRE_SUPPORT: 0.75,
+}
+
+_OPEN_GROUND_TARGET = {
+    OperationType.OFFENSIVE: 0.75,
+    OperationType.DEFENSIVE: 0.25,
+    OperationType.RECON: 0.40,
+    OperationType.SCREEN: 0.45,
+    OperationType.LOGISTICS_HUB: 0.65,
+    OperationType.WITHDRAWAL: 0.60,
+    OperationType.FIRE_SUPPORT: 0.50,
+}
+
+_ROCKY_TARGET = {
+    OperationType.OFFENSIVE: 0.15,
+    OperationType.DEFENSIVE: 0.65,
+    OperationType.RECON: 0.55,
+    OperationType.SCREEN: 0.50,
+    OperationType.LOGISTICS_HUB: 0.20,
+    OperationType.WITHDRAWAL: 0.25,
+    OperationType.FIRE_SUPPORT: 0.55,
+}
+
+
+def _terrain_relief(features: CellFeatures) -> float:
+    contour_density = _normalize(features.contour_count, 0, 6)
+    contour_span = _normalize(features.contour_span_m or 0.0, 0, 40)
+    return _clamp01(0.6 * contour_density + 0.4 * contour_span)
+
+
+def _force_mobility_burden(force: ForceComposition) -> float:
+    total_mounted = sum(vehicle.count for vehicle in force.vehicles) + sum(
+        artillery.count for artillery in force.artillery
+    )
+    heaviest_load = max(force.heaviest_vehicle_t, force.heaviest_artillery_t)
+    burden = (
+        0.6 * _normalize(heaviest_load, 10, 70)
+        + 0.25 * _normalize(total_mounted, 0, 20)
+        + 0.15 * _normalize(force.logistics_demand_t_per_day, 0, 40)
+    )
+    if force.column_movement:
+        burden += 0.08
+    return _clamp01(burden)
+
+
+def _score_components(
+    features: CellFeatures,
+    operation: Operation,
+    force: ForceComposition,
+) -> dict[str, float]:
+    water_ratio = features.water_coverage_ratio or 0.0
+    bog_ratio = features.bog_coverage_ratio or 0.0
+    rocky_ratio = features.rocky_coverage_ratio or 0.0
+    vegetation_ratio = features.forest_vegetation_coverage_ratio or 0.0
+    agriculture_ratio = features.agricultural_coverage_ratio or 0.0
+
+    concealment_count = features.high_concealment_count * 1.3 + features.medium_concealment_count * 0.7
+    forest_density = _normalize(concealment_count, 0, 6)
+    vegetation_cover = _normalize(vegetation_ratio, 0.05, 0.75)
+    open_ground = _clamp01(0.7 * agriculture_ratio + 0.3 * (1.0 - vegetation_cover))
+    concealment = _clamp01(
+        0.55 * forest_density
+        + 0.35 * vegetation_cover
+        + 0.10 * (1.0 - _normalize(agriculture_ratio, 0.05, 0.6))
     )
 
-    if features.max_road_width_m is None and features.road_segment_count == 0:
-        road_access = 0.0
+    relief = _terrain_relief(features)
+    relief_fit = _clamp01(1.0 - abs(relief - _RELIEF_TARGET[operation.type]))
+    open_fit = _clamp01(1.0 - abs(open_ground - _OPEN_GROUND_TARGET[operation.type]))
+    rocky_fit = _clamp01(
+        1.0 - abs(_normalize(rocky_ratio, 0.05, 0.5) - _ROCKY_TARGET[operation.type])
+    )
+    dry_land = _clamp01(1.0 - min(1.0, 1.3 * water_ratio + 0.8 * bog_ratio))
+    terrain_fit = _clamp01(
+        0.40 * relief_fit + 0.25 * dry_land + 0.20 * open_fit + 0.15 * rocky_fit
+    )
+
+    observation = _clamp01(0.70 * relief + 0.30 * (1.0 - concealment))
+
+    cloud_mask = _normalize(features.weather_cloud_pct or 0, 40, 100)
+    precip_mask = _normalize(features.weather_precip_mm or 0, 0.3, 6.0)
+    terrain_mask = _clamp01(0.60 * relief + 0.40 * _normalize(rocky_ratio, 0.05, 0.5))
+    drone_cover = _clamp01(
+        0.45 * concealment + 0.25 * terrain_mask + 0.20 * cloud_mask + 0.10 * precip_mask
+    )
+
+    road_width_score = _normalize(features.max_road_width_m or 0, 3.5, 10)
+    road_density_score = _normalize(features.road_segment_count, 0, 5)
+    road_proximity_score = (
+        0.0 if features.nearest_road_km is None else 1.0 - _normalize(features.nearest_road_km, 0, 10)
+    )
+    heaviest_load = max(force.heaviest_vehicle_t, force.heaviest_artillery_t)
+    if heaviest_load > 0 and features.min_bridge_capacity_t is not None:
+        bridge_score = _clamp01(features.min_bridge_capacity_t / max(heaviest_load, 1.0))
+    elif heaviest_load > 0 and features.road_segment_count:
+        bridge_score = 0.55
     else:
-        width_score = _normalize(features.max_road_width_m or 0, 3, 10)
-        density_score = _normalize(features.road_segment_count, 0, 5)
-        road_access = 0.6 * width_score + 0.4 * density_score
+        bridge_score = 0.7 if features.road_segment_count else 0.0
+
+    burden = _force_mobility_burden(force)
+    precip_stress = _normalize(features.weather_precip_mm or 0, 0.5, 8.0)
+    thaw_stress = (
+        1.0
+        if features.weather_temp_c is not None
+        and -2.0 <= features.weather_temp_c <= 2.0
+        and (features.weather_precip_mm or 0.0) > 0.2
+        else 0.0
+    )
+    weather_penalty = (0.7 * precip_stress + 0.3 * thaw_stress) * (0.35 + 0.65 * burden)
+    narrow_route_penalty = (1.0 - road_width_score) * (0.35 + 0.55 * burden)
+    route_resilience = _clamp01(
+        0.30 * road_width_score
+        + 0.20 * road_density_score
+        + 0.15 * road_proximity_score
+        + 0.20 * bridge_score
+        + 0.15 * (1.0 - weather_penalty)
+        - 0.10 * _normalize(bog_ratio, 0.05, 0.4)
+        - 0.10 * _normalize(water_ratio, 0.05, 0.35)
+        - 0.15 * narrow_route_penalty
+    )
 
     civilian_avoidance = 1.0 - _normalize(features.population_estimate, 0, 500)
 
@@ -100,15 +242,16 @@ def _score_components(features: CellFeatures, operation: Operation) -> dict[str,
     else:
         comms_coverage = 1.0 - _normalize(features.nearest_cell_tower_km, 0, 15)
 
-    if features.nearest_road_km is None:
-        logistics_proximity = 0.0
-    else:
-        logistics_proximity = 1.0 - _normalize(features.nearest_road_km, 0, 20)
+    logistics_proximity = _clamp01(
+        0.55 * road_proximity_score + 0.25 * road_density_score + 0.20 * dry_land
+    )
 
     return {
+        "terrain_fit": terrain_fit,
         "concealment": concealment,
+        "drone_cover": drone_cover,
         "observation": observation,
-        "road_access": road_access,
+        "route_resilience": route_resilience,
         "civilian_avoidance": civilian_avoidance,
         "comms_coverage": comms_coverage,
         "logistics_proximity": logistics_proximity,
@@ -121,19 +264,31 @@ def _weighted_score(components: dict[str, float], weights: dict[str, float]) -> 
 
 def _rationale_lines(features: CellFeatures, components: dict[str, float]) -> list[str]:
     lines: list[str] = []
+    if features.contour_count or features.contour_span_m:
+        lines.append(
+            f"Terrain fit: {features.contour_count} contour lines, relief span {features.contour_span_m or 0:.1f} m (score {components['terrain_fit']:.2f})"
+        )
+    if features.water_coverage_ratio:
+        lines.append(
+            f"Dry ground: {(1.0 - features.water_coverage_ratio):.0%} land after water obstacles"
+        )
     if features.high_concealment_count or features.medium_concealment_count:
         lines.append(
             f"Concealment: {features.high_concealment_count} high + {features.medium_concealment_count} medium forest features (score {components['concealment']:.2f})"
         )
-    if features.max_road_width_m is not None:
+    if features.max_road_width_m is not None or features.road_segment_count:
         lines.append(
-            f"Road access: max width {features.max_road_width_m:.1f} m across {features.road_segment_count} segments (score {components['road_access']:.2f})"
+            f"Route resilience: max width {(features.max_road_width_m or 0):.1f} m across {features.road_segment_count} segments (score {components['route_resilience']:.2f})"
         )
     if features.weather_wind_ms is not None:
         gust = f", gust {features.weather_gust_ms:.1f} m/s" if features.weather_gust_ms else ""
         lines.append(f"Wind: {features.weather_wind_ms:.1f} m/s{gust}")
     if features.weather_precip_mm is not None and features.weather_precip_mm > 0:
         lines.append(f"Precipitation: {features.weather_precip_mm:.1f} mm")
+    if features.forest_vegetation_coverage_ratio:
+        lines.append(
+            f"Drone cover: vegetation on {features.forest_vegetation_coverage_ratio:.0%} of the cell (score {components['drone_cover']:.2f})"
+        )
     if features.population_estimate:
         lines.append(
             f"Civilian footprint: ~{features.population_estimate} residents (avoidance score {components['civilian_avoidance']:.2f})"
@@ -183,15 +338,18 @@ def _scored_cells(
     mask: BaseGeometry,
     records: dict[str, DatasetRecord],
     weights: dict[str, float],
-) -> tuple[list[dict[str, Any]], int, int, list[str]]:
-    cells = _build_cell_grid(mask, request.grid_resolution_m)
+) -> tuple[list[dict[str, Any]], int, int, int, list[str]]:
     notes: list[str] = []
-
-    if len(cells) > PLANNING_MAX_CELLS:
-        raise ValueError(
-            f"Grid produces {len(cells)} cells (cap {PLANNING_MAX_CELLS}). "
-            "Increase grid_resolution_m or draw a smaller AOI."
+    effective_resolution_m, estimated_cells = _effective_grid_resolution(mask, request.grid_resolution_m)
+    if effective_resolution_m != request.grid_resolution_m:
+        notes.append(
+            "Grid auto-coarsened from "
+            f"{request.grid_resolution_m} m to {effective_resolution_m} m "
+            f"to keep the search under {PLANNING_MAX_CELLS} cells "
+            f"(estimated {estimated_cells})."
         )
+
+    cells = _build_cell_grid(mask, effective_resolution_m)
 
     # Build all spatial indexes ONCE for the whole run. Previously each cell
     # re-parsed every GeoJSON feature, which dominated runtime on Finland-sized
@@ -212,7 +370,7 @@ def _scored_cells(
             feasible = is_feasible(matches)
             if feasible:
                 feasible_count += 1
-            components = _score_components(features, request.operation)
+            components = _score_components(features, request.operation, request.force)
             score = _weighted_score(components, weights)
         except Exception as exc:
             # A single bad feature in any source shouldn't kill the entire
@@ -236,13 +394,13 @@ def _scored_cells(
 
     loop_ms = (time.perf_counter() - t_loop) * 1000
     logger.info(
-        "planning: scored %d/%d cells in %.0f ms (index build %.0f ms, %d skipped)",
-        len(scored), len(cells), loop_ms, idx_ms, error_count,
+        "planning: scored %d/%d cells at %dm in %.0f ms (index build %.0f ms, %d skipped)",
+        len(scored), len(cells), effective_resolution_m, loop_ms, idx_ms, error_count,
     )
     if error_count:
         notes.append(f"Skipped {error_count} cells due to feature errors (see server logs).")
 
-    return scored, len(cells), feasible_count, notes
+    return scored, len(cells), feasible_count, effective_resolution_m, notes
 
 
 def recommend_sites(
@@ -255,7 +413,7 @@ def recommend_sites(
     weights = get_operation_profile(request.operation)
     records_by_source = _records_by_source(records)
 
-    scored, total_cells, feasible_count, score_notes = _scored_cells(
+    scored, total_cells, feasible_count, effective_resolution_m, score_notes = _scored_cells(
         request, mask, records_by_source, weights
     )
 
@@ -311,15 +469,15 @@ def recommend_sites(
 
     total_ms = (time.perf_counter() - t_total) * 1000
     logger.info(
-        "planning: complete area=%s cells=%d feasible=%d top_n=%d in %.0f ms",
-        request.area, total_cells, feasible_count, len(top_sites), total_ms,
+        "planning: complete area=%s cells=%d feasible=%d top_n=%d resolution=%dm in %.0f ms",
+        request.area, total_cells, feasible_count, len(top_sites), effective_resolution_m, total_ms,
     )
 
     return PlanningResponse(
         area=request.area,
         timeframe=request.timeframe,
         operation_type=request.operation.type,
-        grid_resolution_m=request.grid_resolution_m,
+        grid_resolution_m=effective_resolution_m,
         cells_evaluated=total_cells,
         feasible_cells=feasible_count,
         top_sites=top_sites,
