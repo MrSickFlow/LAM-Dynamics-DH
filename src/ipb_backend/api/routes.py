@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from ipb_backend.agents.bridge_load import BridgeLoadAgent
 from ipb_backend.agents.celltower import CellTowerAgent
@@ -46,6 +46,7 @@ from ipb_backend.models import (
     PointInspectionRequest,
     PointInspectionResponse,
     SourceCategory,
+    SourceStatus,
     TerrainSnapshot,
     UiLayer,
     UiPlaceholderResponse,
@@ -96,6 +97,15 @@ def _is_bbox_load_target(load_target) -> bool:
     kind = getattr(load_target, "kind", None)
     kind_value = kind.value if hasattr(kind, "value") else kind
     return kind_value == "bbox" and bool(getattr(load_target, "bbox_wgs84", None))
+
+
+def _is_async_ingest_request(request: IngestionRequest) -> bool:
+    load_target = request.load_target
+    if load_target is None:
+        return False
+    kind = getattr(load_target, "kind", None)
+    kind_value = kind.value if hasattr(kind, "value") else kind
+    return kind_value in {"bbox", "geometry"}
 
 
 def _latest_records_by_source(records):
@@ -605,9 +615,24 @@ _AOI_CACHE_MAX_ENTRIES = 8
 _aoi_cache: dict[str, tuple[float, Any]] = {}  # key → (expires_at, result)
 
 
-def _aoi_cache_key(request: AoiInspectionRequest) -> str:
+def _aoi_cache_key(request: AoiInspectionRequest, records: list[DatasetRecord]) -> str:
+    record_signature = [
+        {
+            "source_id": record.source_id,
+            "area": record.area,
+            "timeframe": record.timeframe,
+            "retrieved_at": record.retrieved_at.isoformat(),
+            "load_target": record.load_target.model_dump(mode="json") if record.load_target is not None else None,
+        }
+        for record in records
+    ]
     payload = json.dumps(
-        {"geometry": request.geometry, "timeframe": request.timeframe or "latest", "area": request.area or ""},
+        {
+            "geometry": request.geometry,
+            "timeframe": request.timeframe or "latest",
+            "area": request.area or "",
+            "records": record_signature,
+        },
         sort_keys=True,
         separators=(",", ":"),
         default=str,
@@ -626,7 +651,8 @@ def _prune_aoi_cache(now: float) -> None:
 
 
 def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], DataPackage]:
-    cache_key = _aoi_cache_key(request)
+    all_records = services["ingestion_service"].records
+    cache_key = _aoi_cache_key(request, all_records)
     now = time.monotonic()
     _prune_aoi_cache(now)
     cached = _aoi_cache.get(cache_key)
@@ -641,7 +667,6 @@ def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[s
     elif mask.geom_type != "Polygon":
         raise HTTPException(status_code=400, detail="AOI geometry must be a Polygon or MultiPolygon")
 
-    all_records = services["ingestion_service"].records
     source_names = {
         definition.source_id: definition.name
         for definition in services["registry"].list_sources()
@@ -701,15 +726,29 @@ async def list_sources(services=Depends(get_services)):
     return services["registry"].list_sources()
 
 
-@router.post("/ingest", status_code=202)
+@router.post("/ingest")
 async def ingest(request: IngestionRequest, background_tasks: BackgroundTasks, services=Depends(get_services)):
     try:
         source_ids = request.source_ids or services["registry"].enabled_source_ids()
         missing = services["registry"].missing_source_ids(source_ids)
         if missing:
             raise HTTPException(status_code=400, detail=f"Unknown source ids: {', '.join(sorted(missing))}")
-        background_tasks.add_task(services["ingestion_service"].ingest, request)
-        return {"status": "started", "source_ids": source_ids}
+
+        if _is_async_ingest_request(request):
+            for source_id in source_ids:
+                definition = services["registry"].get(source_id)
+                if not definition.enabled:
+                    continue
+                services["registry"].update(
+                    definition.model_copy(update={"status": SourceStatus.RUNNING, "last_error": None})
+                )
+            background_tasks.add_task(services["ingestion_service"].ingest, request)
+            return JSONResponse(status_code=202, content={"status": "started", "source_ids": source_ids})
+
+        result = await services["ingestion_service"].ingest(request)
+        payload = result.model_dump(mode="json")
+        payload["source_ids"] = source_ids
+        return payload
     except HTTPException:
         raise
     except ValueError as exc:
