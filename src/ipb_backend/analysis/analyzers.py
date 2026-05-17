@@ -378,7 +378,7 @@ def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, An
             lines.append("  OBSERVED RANGE:")
             lines.extend(trend_lines)
 
-        # 48-hour forecast
+        # Forecast (horizon set by the user's timeframe, capped by FMI HARMONIE)
         forecast = fmi.get("forecast", {})
         fc_obs = forecast.get("observations", {})
         if fc_obs:
@@ -396,7 +396,10 @@ def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, An
             if fc_cloud:
                 fc_parts.append(f"cloud avg {fc_cloud['mean']}%")
             if fc_parts:
-                lines.append(f"  FORECAST (next 48h): {', '.join(fc_parts)}")
+                horizon = fmi_query.get("forecast_hours") or len(
+                    fc_obs.get("temperature", {}).get("values", [])
+                ) or 48
+                lines.append(f"  FORECAST (next {int(horizon)}h): {', '.join(fc_parts)}")
 
         # Consolidated operational notes across observed + forecast worst-case
         peak_wind = max(
@@ -429,28 +432,41 @@ def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, An
             lines.append("  OPERATIONAL WEATHER NOTES:")
             lines.extend(op_notes)
 
-    # ── Satellite overpass schedule ───────────────────────────────────────────
+    # ── Satellite overpass schedule (AOI-scoped via swath intersection) ──────
     sat_data = raw_data.get("satellites", {})
-    satellites = sat_data.get("satellites", {}) if isinstance(sat_data, dict) else {}
-    if satellites:
-        sat_query = sat_data.get("query", {})
-        win_start = sat_query.get("window_start", "")
-        win_end = sat_query.get("window_end", "")
-        win_label = f" ({win_start[:10]} → {win_end[:10]})" if win_start else ""
-        lines.append(f"SATELLITE OVERPASSES{win_label}:")
-        for name, info in list(satellites.items())[:12]:
-            passes = info.get("predicted_passes", [])
+    sats_with_passes = sat_data.get("satellites_with_passes", []) if isinstance(sat_data, dict) else []
+    if sats_with_passes:
+        win = sat_data.get("window", {}) or {}
+        hrs = win.get("hours")
+        win_label = f" (next {int(hrs)}h over AOI)" if hrs else ""
+        total = sat_data.get("total_passes_in_window", 0)
+        tracked = sat_data.get("satellites_total_tracked", 0)
+        lines.append(
+            f"SATELLITE OVERPASSES{win_label}: {total} passes from "
+            f"{len(sats_with_passes)} of {tracked} tracked satellites image the AOI"
+        )
+        for sat in sats_with_passes[:12]:
+            passes = sat.get("passes", [])
             if not passes:
                 continue
-            first_pass = passes[0].get("pass_time_utc", "")[:16].replace("T", " ")
-            sat_type = info.get("type", "")
+            first = passes[0]
+            t_label = first.get("start_utc", "")[:16].replace("T", " ")
+            sensor = "SAR" if sat.get("is_sar") else "optical"
+            origin = " [RUSSIAN]" if sat.get("origin") == "russian" else ""
             lines.append(
-                f"  - {name} ({sat_type}): {len(passes)} passes, first {first_pass}Z"
+                f"  - {sat['name']} ({sat.get('type','?')}, {sensor}){origin}: "
+                f"{len(passes)} passes, next {t_label}Z, closest {first.get('closest_km','?')} km"
             )
         # Warn if cloud cover will degrade optical passes
         cloud_stats_for_warn = _ts_stats(obs.get("cloud_cover", {})) if obs else {}
         if cloud_stats_for_warn.get("mean", 0) > 60:
-            lines.append("  NOTE: High cloud cover forecast — optical passes (Sentinel-2, WorldView, GeoEye, Pleiades) likely obscured; SAR passes unaffected")
+            lines.append("  NOTE: High cloud cover forecast — optical passes likely obscured; SAR passes unaffected")
+    elif isinstance(sat_data, dict) and sat_data.get("satellites_total_tracked"):
+        # Tracked but none currently image the AOI in this horizon
+        lines.append(
+            f"SATELLITE OVERPASSES: No imaging passes over AOI in the selected window "
+            f"({sat_data.get('satellites_total_tracked')} satellites tracked globally)"
+        )
 
     # Population
     pop = raw_data.get("statistics-finland", {})
@@ -880,7 +896,7 @@ def _rules_intsum_sections(data_package: dict[str, Any], raw_data: dict[str, Any
         "Assessment based solely on open-source intelligence inputs. "
         "No HUMINT, SIGINT, or current enemy disposition data integrated. "
         "Terrain analysis is structural; trafficability requires ground reconnaissance to confirm. "
-        "Weather snapshot only — forecast not integrated."
+        "Weather covers recent observations plus FMI HARMONIE forecast up to the selected horizon."
     )
 
     return {

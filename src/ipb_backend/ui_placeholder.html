@@ -738,6 +738,44 @@
       color: var(--muted);
     }
 
+    .sparkline-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      background: rgba(255, 255, 255, 0.7);
+    }
+    .sparkline-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .sparkline-header .sparkline-range {
+      font-weight: 600;
+      color: var(--accent-3);
+    }
+    .sparkline-svg { display: block; width: 100%; height: 42px; }
+
+    .overpass-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 10px;
+      border-left: 3px solid var(--accent);
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: 6px;
+      margin-bottom: 4px;
+      font-size: 0.82rem;
+    }
+    .overpass-row.is-sar { border-left-color: #e67e22; }
+    .overpass-row.is-russian { border-left-color: #c0392b; }
+    .overpass-row .op-name { font-weight: 600; }
+    .overpass-row .op-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .overpass-row .op-meta { font-size: 0.74rem; color: var(--muted); }
+
     .selection-meta {
       margin-top: 10px;
       font-size: 0.86rem;
@@ -1462,6 +1500,28 @@
         </div>
       </div>
 
+      <div class="section is-collapsible" data-section id="forecast-series-section" style="display:none">
+        <button class="section-toggle" type="button" aria-expanded="true">
+          <div class="section-header">Weather Forecast (over horizon)</div>
+          <span class="collapse-icon">▾</span>
+        </button>
+        <div class="section-body">
+          <p class="subhead" id="forecast-series-subhead" style="margin:0 0 8px"></p>
+          <div id="forecast-series-grid"></div>
+        </div>
+      </div>
+
+      <div class="section is-collapsible" data-section id="overpass-timeline-section" style="display:none">
+        <button class="section-toggle" type="button" aria-expanded="true">
+          <div class="section-header">Satellite Overpasses (AOI)</div>
+          <span class="collapse-icon">▾</span>
+        </button>
+        <div class="section-body">
+          <p class="subhead" id="overpass-timeline-subhead" style="margin:0 0 8px"></p>
+          <div id="overpass-timeline-list"></div>
+        </div>
+      </div>
+
       <div class="section is-collapsible is-collapsed" data-section>
         <button class="section-toggle" type="button" aria-expanded="false">
           <div class="section-header">AOI Metrics</div>
@@ -1580,11 +1640,16 @@
 
     let _tfMode = "forecast"; // "snapshot" | "forecast"
     let _lastForecastTf = "72h"; // remembered when switching back from snapshot
+    let _pendingReload = false;  // user changed timeframe mid-load → re-fire after
 
     function setTimeframe(value, triggerLoad = false) {
       timeframeInput.value = value;
       state.timeframe = value;
-      if (triggerLoad && state.sources.length > 0 && !state.isLoading) {
+      if (!triggerLoad || state.sources.length === 0) return;
+      if (state.isLoading) {
+        // Coalesce rapid clicks: remember that the latest selection still needs to load.
+        _pendingReload = true;
+      } else {
         bootstrapWorkspace();
       }
     }
@@ -1779,8 +1844,11 @@
       },
     ];
 
-    const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "satellites", "digitraffic-road-surface"];
-    const CUSTOM_LOAD_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "osm-poi"];
+    // Satellite TLE data is global, but the overlay only makes sense focused on
+    // a specific area — keep it out of the named-area ingest, add it in the
+    // bbox ingest so it activates once the user draws a load rectangle.
+    const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "digitraffic-road-surface"];
+    const CUSTOM_LOAD_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "osm-poi", "satellites"];
     const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellites", "satellite-tracks", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-logistics", "poi-ports_terminals", "poi-forest", "poi-religion"]);
 
     const COLL_STYLE = {
@@ -2604,7 +2672,7 @@
         const geojson = await response.json();
         state.collectionLayers["satellites"]?.clearLayers();
         if (geojson.available === false) {
-          setLayerAvailability(["satellites"], false, "Satellite data unavailable.");
+          setLayerAvailability(["satellites"], false, geojson.message || "Satellite data unavailable.");
           return;
         }
         setLayerAvailability(["satellites"], true);
@@ -2619,11 +2687,12 @@
 
     async function loadSatelliteTrackData() {
       try {
-        const response = await fetch(`/api/map-data/satellite-tracks?area=${encodeURIComponent(getWorkspaceArea())}&hours=8`);
+        const tf = encodeURIComponent(state.timeframe || "24h");
+        const response = await fetch(`/api/map-data/satellite-tracks?area=${encodeURIComponent(getWorkspaceArea())}&timeframe=${tf}`);
         const geojson = await response.json();
         state.collectionLayers["satellite-tracks"]?.clearLayers();
         if (geojson.available === false) {
-          setLayerAvailability(["satellite-tracks"], false, "Ground track data unavailable.");
+          setLayerAvailability(["satellite-tracks"], false, geojson.message || "Ground track data unavailable.");
           return;
         }
         setLayerAvailability(["satellite-tracks"], true);
@@ -3466,6 +3535,10 @@
       renderConversationEmpty(message);
       renderFreshness(state.sources);
       renderRawData(null, null);
+      const fcSec = document.getElementById("forecast-series-section");
+      if (fcSec) fcSec.style.display = "none";
+      const opSec = document.getElementById("overpass-timeline-section");
+      if (opSec) opSec.style.display = "none";
     }
 
     function renderInspection(payload) {
@@ -3475,9 +3548,135 @@
       renderMetrics(payload.metrics);
       renderAgent(payload.agent);
       setConversationFromInspection(payload);
+      renderForecastSeries(payload.raw_data?.fmi);
+      renderOverpassTimeline(payload.raw_data?.satellites);
       document.getElementById("chat-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
       renderFreshness(payload.freshness);
       renderRawData(payload.raw_sections, payload.raw_data);
+    }
+
+    function _drawSparkline(values, opts = {}) {
+      // Returns an inline <svg> string. Values are numeric; we plot a polyline
+      // normalized to the SVG box so the user can eyeball trend + range.
+      const w = 220, h = 42, pad = 4;
+      const real = values.filter((v) => typeof v === "number" && !isNaN(v));
+      if (real.length < 2) return "";
+      const min = Math.min(...real), max = Math.max(...real);
+      const range = max - min || 1;
+      const dx = (w - 2 * pad) / (values.length - 1);
+      const pts = values.map((v, i) => {
+        if (typeof v !== "number" || isNaN(v)) return null;
+        const x = pad + i * dx;
+        const y = h - pad - ((v - min) / range) * (h - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).filter(Boolean).join(" ");
+      const stroke = opts.color || "#195d85";
+      return `<svg class="sparkline-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+        <polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="1.6"/>
+      </svg>`;
+    }
+
+    const SPARK_PARAMS = [
+      { key: "temperature", label: "Temperature", unit: "°C", color: "#c46c32" },
+      { key: "wind_speed",  label: "Wind speed",  unit: "m/s", color: "#195d85" },
+      { key: "cloud_cover", label: "Cloud cover", unit: "%",   color: "#7f8c8d" },
+      { key: "precipitation", label: "Precipitation", unit: "mm/h", color: "#2c7a7b" },
+    ];
+
+    function renderForecastSeries(fmiRaw) {
+      const section = document.getElementById("forecast-series-section");
+      const grid = document.getElementById("forecast-series-grid");
+      const subhead = document.getElementById("forecast-series-subhead");
+      if (!section || !grid) return;
+      const fc = fmiRaw?.forecast?.observations || {};
+      const hasAny = SPARK_PARAMS.some((p) => (fc[p.key]?.values || []).some((pt) => pt.value != null));
+      if (!hasAny) {
+        section.style.display = "none";
+        return;
+      }
+      const q = fmiRaw?.query || {};
+      const horizon = q.forecast_hours;
+      const station = fmiRaw?.station || {};
+      const stationLabel = station.name
+        ? `${station.name}${station.distance_from_bbox_km ? ` · ${station.distance_from_bbox_km} km from AOI` : ""}`
+        : "";
+      subhead.textContent = horizon
+        ? `Next ${horizon} h${stationLabel ? " · " + stationLabel : ""}`
+        : stationLabel;
+      grid.innerHTML = "";
+      for (const p of SPARK_PARAMS) {
+        const param = fc[p.key];
+        if (!param) continue;
+        const points = (param.values || []).filter((pt) => pt.value != null);
+        if (points.length < 2) continue;
+        const values = points.map((pt) => pt.value);
+        const min = Math.min(...values), max = Math.max(...values);
+        const card = document.createElement("div");
+        card.className = "sparkline-card";
+        card.innerHTML = `
+          <div class="sparkline-header">
+            <span>${p.label}</span>
+            <span class="sparkline-range">${min.toFixed(1)} – ${max.toFixed(1)} ${p.unit}</span>
+          </div>
+          ${_drawSparkline(values, { color: p.color })}
+        `;
+        grid.appendChild(card);
+      }
+      section.style.display = "";
+    }
+
+    function renderOverpassTimeline(satRaw) {
+      const section = document.getElementById("overpass-timeline-section");
+      const list = document.getElementById("overpass-timeline-list");
+      const subhead = document.getElementById("overpass-timeline-subhead");
+      if (!section || !list) return;
+      const sats = satRaw?.satellites_with_passes || [];
+      if (!sats.length) {
+        section.style.display = "none";
+        return;
+      }
+      const total = satRaw?.total_passes_in_window || 0;
+      const tracked = satRaw?.satellites_total_tracked || 0;
+      const hrs = satRaw?.window?.hours;
+      subhead.textContent = `${total} passes from ${sats.length} of ${tracked} tracked satellites${hrs ? ` · next ${Math.round(hrs)} h` : ""}`;
+
+      // Flatten to chronological pass list
+      const flat = [];
+      sats.forEach((s) => (s.passes || []).forEach((p) => {
+        flat.push({
+          name: s.name,
+          type: s.type,
+          is_sar: s.is_sar,
+          origin: s.origin,
+          start: p.start_utc,
+          closest_km: p.closest_km,
+          duration_seconds: p.duration_seconds,
+        });
+      }));
+      flat.sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+
+      list.innerHTML = "";
+      flat.slice(0, 30).forEach((p) => {
+        const row = document.createElement("div");
+        row.className = "overpass-row";
+        if (p.is_sar) row.classList.add("is-sar");
+        if (p.origin === "russian") row.classList.add("is-russian");
+        const t = (p.start || "").slice(0, 16).replace("T", " ") + "Z";
+        const dur = p.duration_seconds ? `${Math.max(1, Math.round(p.duration_seconds / 60))} min` : "";
+        const sensor = p.is_sar ? "SAR" : "optical";
+        row.innerHTML = `
+          <div>
+            <div class="op-name">${p.name}</div>
+            <div class="op-meta">${p.type || ""} · ${sensor}${p.origin === "russian" ? " · RUSSIAN" : ""}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="op-time">${t}</div>
+            <div class="op-meta">${p.closest_km != null ? p.closest_km + " km closest" : ""}${dur ? " · " + dur : ""}</div>
+          </div>
+        `;
+        list.appendChild(row);
+      });
+      section.style.display = "";
     }
 
     async function inspectSelection(geometry) {
@@ -3517,6 +3716,13 @@
       if (pointInspectorBtn) { pointInspectorBtn.textContent = "Point Inspector"; pointInspectorBtn.style.background = ""; pointInspectorBtn.style.color = ""; }
       state.timeframe = timeframeInput.value.trim() || "72h";
       state.isLoading = true;
+
+      // Clear timeframe-sensitive overlays up front so users don't see stale
+      // tracks/cells/POIs while the new ingest runs. Static base layers (NLS
+      // road/lake/building) stay visible — they don't change with timeframe.
+      const TIMEFRAME_SENSITIVE_LAYERS = ["satellite-tracks", "satellites", "weather", "road-surface"];
+      TIMEFRAME_SENSITIVE_LAYERS.forEach((id) => state.collectionLayers[id]?.clearLayers());
+      if (state.weatherMarker) { state.map.removeLayer(state.weatherMarker); state.weatherMarker = null; }
 
       refreshBtn.disabled = true;
       refreshBtn.textContent = "Loading...";
@@ -3620,6 +3826,11 @@
         statusLine.classList.remove("is-loading");
         refreshBtn.disabled = false;
         refreshBtn.textContent = "Load Data";
+        // If the user changed timeframe while we were loading, run again now.
+        if (_pendingReload) {
+          _pendingReload = false;
+          bootstrapWorkspace();
+        }
       }
     }
 

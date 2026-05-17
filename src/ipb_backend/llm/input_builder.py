@@ -30,7 +30,7 @@ def _summarize_source_details(raw_summary: dict[str, Any]) -> dict[str, Any]:
 
     observations = raw_summary.get("observations") or {}
     if observations:
-        # Pass the latest value per parameter so the LLM sees actual numbers.
+        # Latest values per parameter so the LLM sees actual numbers.
         details["current_observations"] = {
             key: {
                 "label": param.get("label", key),
@@ -41,12 +41,65 @@ def _summarize_source_details(raw_summary: dict[str, Any]) -> dict[str, Any]:
             if (param.get("latest") or {}).get("value") is not None
         }
 
+    # Forecast time-series — keep all hourly points so the LLM can reason about
+    # diurnal trends, frontal passages, and operating windows. Forecast horizon
+    # is already capped at FMI HARMONIE's 48h ceiling.
+    forecast = raw_summary.get("forecast") or {}
+    fc_obs = forecast.get("observations") if isinstance(forecast, dict) else None
+    if fc_obs:
+        series: dict[str, dict[str, Any]] = {}
+        for key, param in fc_obs.items():
+            values = param.get("values") or []
+            cleaned = [
+                {"t": pt.get("time"), "v": pt.get("value")}
+                for pt in values
+                if pt.get("value") is not None
+            ]
+            if not cleaned:
+                continue
+            series[key] = {
+                "label": param.get("label", key),
+                "unit": param.get("unit", ""),
+                "points": cleaned,
+            }
+        if series:
+            details["forecast_series"] = series
+
+    # Satellite overpass schedule — emit a compact, chronologically sorted list
+    # of pass windows so the LLM can answer "when is the next gap?" / "is the
+    # AOI imaged tonight?".
+    sats_with_passes = raw_summary.get("satellites_with_passes") or []
+    if sats_with_passes:
+        all_passes: list[dict[str, Any]] = []
+        for sat in sats_with_passes:
+            for p in sat.get("passes", []):
+                all_passes.append({
+                    "name": sat.get("name"),
+                    "type": sat.get("type"),
+                    "is_sar": sat.get("is_sar", False),
+                    "start_utc": p.get("start_utc"),
+                    "end_utc": p.get("end_utc"),
+                    "closest_km": p.get("closest_km"),
+                    "duration_seconds": p.get("duration_seconds"),
+                })
+        all_passes.sort(key=lambda p: p.get("start_utc") or "")
+        details["pass_schedule"] = all_passes
+        details["sat_pass_counts"] = {
+            "total_passes": raw_summary.get("total_passes_in_window", 0),
+            "satellites_observing_aoi": len(sats_with_passes),
+            "satellites_tracked": raw_summary.get("satellites_total_tracked", 0),
+        }
+        window = raw_summary.get("window") or {}
+        if window:
+            details["window"] = window
+
     # Include query window so the LLM knows the temporal scope.
     query = raw_summary.get("query") or {}
     if query.get("start_time") or query.get("window_start"):
         details["time_window"] = {
             "start": query.get("start_time") or query.get("window_start"),
             "end": query.get("end_time") or query.get("window_end"),
+            "forecast_hours": query.get("forecast_hours"),
         }
 
     return details

@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import logging
 import math
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
+from shapely.strtree import STRtree
 
 from ipb_backend.models import DatasetRecord
 from ipb_backend.planning.force_model import ConstraintMatch, ForceComposition
 from ipb_backend.spatial import geojson_to_shape
+
+logger = logging.getLogger(__name__)
 
 
 _DEG_LAT_KM = 110.57
@@ -120,15 +125,274 @@ def _build_link_limits(record: DatasetRecord) -> dict[str, dict[str, Optional[fl
     return by_link
 
 
-def _safe_centroid(geometry: dict[str, Any]) -> Optional[tuple[float, float]]:
+def _safe_shape(geometry: dict[str, Any]) -> Optional[BaseGeometry]:
     try:
         shape = geojson_to_shape(geometry)
     except Exception:
         return None
     if shape.is_empty:
         return None
+    return shape
+
+
+def _safe_centroid(geometry: dict[str, Any]) -> Optional[tuple[float, float]]:
+    shape = _safe_shape(geometry)
+    if shape is None:
+        return None
     centroid = shape.centroid
     return (centroid.x, centroid.y)
+
+
+# ---------------------------------------------------------------------------
+# Per-source spatial index built once per planning call.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _IndexedFeature:
+    geom: BaseGeometry
+    props: dict[str, Any]
+
+
+@dataclass
+class _IndexedLayer:
+    """Pre-shapified features + STRtree for O(log N) cell intersection."""
+
+    features: list[_IndexedFeature] = field(default_factory=list)
+    tree: Optional[STRtree] = None
+
+    @classmethod
+    def from_geojson_features(cls, items: Iterable[dict[str, Any]]) -> "_IndexedLayer":
+        feats: list[_IndexedFeature] = []
+        for item in items:
+            geometry = item.get("geometry")
+            if not geometry:
+                continue
+            shape = _safe_shape(geometry)
+            if shape is None:
+                continue
+            feats.append(_IndexedFeature(geom=shape, props=item.get("properties") or {}))
+        tree = STRtree([f.geom for f in feats]) if feats else None
+        return cls(features=feats, tree=tree)
+
+    @classmethod
+    def from_points(cls, items: Iterable[dict[str, Any]], lon_key: str = "lon", lat_key: str = "lat") -> "_IndexedLayer":
+        feats: list[_IndexedFeature] = []
+        for item in items:
+            lon, lat = item.get(lon_key), item.get(lat_key)
+            if lon is None or lat is None:
+                continue
+            feats.append(_IndexedFeature(geom=Point(lon, lat), props=item))
+        tree = STRtree([f.geom for f in feats]) if feats else None
+        return cls(features=feats, tree=tree)
+
+    def query_intersecting(self, cell: BaseGeometry) -> list[_IndexedFeature]:
+        if self.tree is None or not self.features:
+            return []
+        idxs = self.tree.query(cell, predicate="intersects")
+        return [self.features[i] for i in idxs]
+
+    def query_within(self, cell: BaseGeometry) -> list[_IndexedFeature]:
+        if self.tree is None or not self.features:
+            return []
+        idxs = self.tree.query(cell, predicate="within")
+        return [self.features[i] for i in idxs]
+
+    def nearest_distance_km(self, lon: float, lat: float) -> Optional[float]:
+        """Great-circle km from (lon, lat) to nearest feature's geometry."""
+        if self.tree is None or not self.features:
+            return None
+        idx = self.tree.nearest(Point(lon, lat))
+        if idx is None:
+            return None
+        feat = self.features[int(idx)]
+        # For points, this is exact. For lines/polygons, use shapely's nearest
+        # point on the geometry (in degree space) then haversine — accurate
+        # for the small distances we care about.
+        nearest_geom_pt = feat.geom.interpolate(feat.geom.project(Point(lon, lat)))
+        return haversine_km((lon, lat), (nearest_geom_pt.x, nearest_geom_pt.y))
+
+
+@dataclass
+class SourceIndex:
+    """All spatial indexes + scalar weather snapshot used during a planning run.
+
+    Built ONCE in recommend_sites() and reused across every cell. Avoids the
+    previous behaviour of re-parsing every GeoJSON feature per cell, which
+    drove 30–90s planning runs into the minutes for large areas.
+    """
+
+    bridges: _IndexedLayer = field(default_factory=_IndexedLayer)
+    bridge_link_limits: dict[str, dict[str, Optional[float]]] = field(default_factory=dict)
+    roads: _IndexedLayer = field(default_factory=_IndexedLayer)
+    forests: _IndexedLayer = field(default_factory=_IndexedLayer)
+    other_pois: _IndexedLayer = field(default_factory=_IndexedLayer)
+    cell_towers: _IndexedLayer = field(default_factory=_IndexedLayer)
+    population: _IndexedLayer = field(default_factory=_IndexedLayer)
+
+    # Weather is global (one station per ingest), so cache the latest readings.
+    weather_temp_c: Optional[float] = None
+    weather_wind_ms: Optional[float] = None
+    weather_gust_ms: Optional[float] = None
+    weather_precip_mm: Optional[float] = None
+    weather_cloud_pct: Optional[float] = None
+    weather_humidity_pct: Optional[float] = None
+
+    @classmethod
+    def build(cls, records: dict[str, DatasetRecord]) -> "SourceIndex":
+        idx = cls()
+
+        digiroad = records.get("digiroad")
+        if digiroad is not None:
+            idx.bridge_link_limits = _build_link_limits(digiroad)
+            idx.bridges = _IndexedLayer.from_geojson_features(
+                _iter_digiroad_features(digiroad, "dr_tielinkki_silta_alikulku_tunneli")
+            )
+            idx.roads = _IndexedLayer.from_geojson_features(
+                _iter_digiroad_features(digiroad, "dr_leveys")
+            )
+
+        osm = records.get("osm-poi")
+        if osm is not None:
+            categories = osm.data.get("categories", {}) or {}
+            idx.forests = _IndexedLayer.from_points(categories.get("forest", []) or [])
+            other_items: list[dict[str, Any]] = []
+            for category_id, items in categories.items():
+                if category_id == "forest":
+                    continue
+                other_items.extend(items or [])
+            idx.other_pois = _IndexedLayer.from_points(other_items)
+
+        opencellid = records.get("opencellid")
+        if opencellid is not None:
+            idx.cell_towers = _IndexedLayer.from_points(opencellid.data.get("cells", []) or [])
+
+        population = records.get("statistics-finland")
+        if population is not None:
+            idx.population = _IndexedLayer.from_geojson_features(
+                population.data.get("features", []) or []
+            )
+
+        fmi = records.get("fmi")
+        if fmi is not None:
+            observations = fmi.data.get("observations") or {}
+
+            def _latest(name: str) -> Optional[float]:
+                entry = observations.get(name) or {}
+                value = (entry.get("latest") or {}).get("value")
+                try:
+                    return float(value) if value is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            idx.weather_temp_c = _latest("temperature")
+            idx.weather_wind_ms = _latest("wind_speed")
+            idx.weather_gust_ms = _latest("wind_gust")
+            idx.weather_precip_mm = _latest("precipitation")
+            idx.weather_cloud_pct = _latest("cloud_cover")
+            idx.weather_humidity_pct = _latest("humidity")
+
+        logger.debug(
+            "planning index built: bridges=%d roads=%d forests=%d pois=%d towers=%d pop=%d",
+            len(idx.bridges.features),
+            len(idx.roads.features),
+            len(idx.forests.features),
+            len(idx.other_pois.features),
+            len(idx.cell_towers.features),
+            len(idx.population.features),
+        )
+        return idx
+
+
+# ---------------------------------------------------------------------------
+# Per-cell extraction (uses pre-built indexes; no per-cell re-shapification)
+# ---------------------------------------------------------------------------
+
+
+def extract_cell_features_indexed(
+    cell: BaseGeometry,
+    cell_centroid: tuple[float, float],
+    index: SourceIndex,
+) -> CellFeatures:
+    features = CellFeatures()
+    centroid_lon, centroid_lat = cell_centroid
+
+    # Bridges within the cell
+    for bridge in index.bridges.query_intersecting(cell):
+        link_id = bridge.props.get("link_id")
+        limits = index.bridge_link_limits.get(link_id, {})
+
+        weight_kg = limits.get("max_weight_kg")
+        if weight_kg is not None:
+            weight_t = weight_kg / 1000.0
+            if features.min_bridge_capacity_t is None or weight_t < features.min_bridge_capacity_t:
+                features.min_bridge_capacity_t = weight_t
+        height_cm = limits.get("max_height_cm")
+        if height_cm is not None:
+            height_m = height_cm / 100.0
+            if features.min_bridge_height_m is None or height_m < features.min_bridge_height_m:
+                features.min_bridge_height_m = height_m
+        width_cm = limits.get("max_width_cm")
+        if width_cm is not None:
+            width_m = width_cm / 100.0
+            if features.min_bridge_width_m is None or width_m < features.min_bridge_width_m:
+                features.min_bridge_width_m = width_m
+
+    # Roads intersecting the cell
+    for road in index.roads.query_intersecting(cell):
+        features.road_segment_count += 1
+        width_cm = road.props.get("arvo")
+        if width_cm is not None:
+            width_m = width_cm / 100.0
+            if features.max_road_width_m is None or width_m > features.max_road_width_m:
+                features.max_road_width_m = width_m
+
+    # Nearest road (true point-on-geometry distance, not centroid-to-centroid)
+    features.nearest_road_km = index.roads.nearest_distance_km(centroid_lon, centroid_lat)
+
+    # Forest points inside the cell → concealment counts
+    for forest in index.forests.query_within(cell):
+        features.forest_feature_count += 1
+        rating = _classify_forest(forest.props.get("tags") or {})
+        if rating == "high":
+            features.high_concealment_count += 1
+        elif rating == "medium":
+            features.medium_concealment_count += 1
+
+    # Nearest non-forest POI
+    features.nearest_poi_km = index.other_pois.nearest_distance_km(centroid_lon, centroid_lat)
+
+    # Weather is global for this run — same for every cell
+    features.weather_temp_c = index.weather_temp_c
+    features.weather_wind_ms = index.weather_wind_ms
+    features.weather_gust_ms = index.weather_gust_ms
+    features.weather_precip_mm = index.weather_precip_mm
+    features.weather_cloud_pct = index.weather_cloud_pct
+    features.weather_humidity_pct = index.weather_humidity_pct
+
+    # Cell towers
+    for tower in index.cell_towers.query_within(cell):
+        features.cell_tower_count += 1
+    features.nearest_cell_tower_km = index.cell_towers.nearest_distance_km(centroid_lon, centroid_lat)
+
+    # Population — area-weighted overlap on the indexed candidates only
+    total_pop = 0
+    for pop in index.population.query_intersecting(cell):
+        source_pop_raw = pop.props.get("population", 0)
+        try:
+            source_pop = int(source_pop_raw or 0)
+        except (TypeError, ValueError):
+            continue
+        if source_pop <= 0:
+            continue
+        geom = pop.geom
+        if geom.area <= 0:
+            continue
+        overlap = geom.intersection(cell).area / geom.area
+        total_pop += int(round(source_pop * overlap))
+    features.population_estimate = total_pop
+
+    return features
 
 
 def extract_cell_features(
@@ -136,161 +400,19 @@ def extract_cell_features(
     cell_centroid: tuple[float, float],
     records: dict[str, DatasetRecord],
 ) -> CellFeatures:
-    features = CellFeatures()
+    """Backwards-compatible wrapper — builds the index on every call.
 
-    digiroad = records.get("digiroad")
-    if digiroad is not None:
-        link_limits = _build_link_limits(digiroad)
+    Prefer `extract_cell_features_indexed` with a pre-built `SourceIndex` for
+    planning runs that touch many cells (the per-call build dominates for a
+    single-cell extraction, so this stays correct for unit-test usage).
+    """
+    index = SourceIndex.build(records)
+    return extract_cell_features_indexed(cell, cell_centroid, index)
 
-        for bridge in _iter_digiroad_features(digiroad, "dr_tielinkki_silta_alikulku_tunneli"):
-            geometry = bridge.get("geometry")
-            if not geometry:
-                continue
-            try:
-                geom = geojson_to_shape(geometry)
-            except Exception:
-                continue
-            if geom.is_empty or not geom.intersects(cell):
-                continue
 
-            props = bridge.get("properties") or {}
-            link_id = props.get("link_id")
-            limits = link_limits.get(link_id, {})
-
-            weight_kg = limits.get("max_weight_kg")
-            if weight_kg is not None:
-                weight_t = weight_kg / 1000.0
-                if features.min_bridge_capacity_t is None or weight_t < features.min_bridge_capacity_t:
-                    features.min_bridge_capacity_t = weight_t
-
-            height_cm = limits.get("max_height_cm")
-            if height_cm is not None:
-                height_m = height_cm / 100.0
-                if features.min_bridge_height_m is None or height_m < features.min_bridge_height_m:
-                    features.min_bridge_height_m = height_m
-
-            width_cm = limits.get("max_width_cm")
-            if width_cm is not None:
-                width_m = width_cm / 100.0
-                if features.min_bridge_width_m is None or width_m < features.min_bridge_width_m:
-                    features.min_bridge_width_m = width_m
-
-        nearest_road_km: Optional[float] = None
-        for road in _iter_digiroad_features(digiroad, "dr_leveys"):
-            geometry = road.get("geometry")
-            if not geometry:
-                continue
-            try:
-                geom = geojson_to_shape(geometry)
-            except Exception:
-                continue
-            if geom.is_empty:
-                continue
-
-            if geom.intersects(cell):
-                features.road_segment_count += 1
-                width_cm = (road.get("properties") or {}).get("arvo")
-                if width_cm is not None:
-                    width_m = width_cm / 100.0
-                    if features.max_road_width_m is None or width_m > features.max_road_width_m:
-                        features.max_road_width_m = width_m
-
-            road_centroid = geom.centroid
-            if not road_centroid.is_empty:
-                distance_km = haversine_km(cell_centroid, (road_centroid.x, road_centroid.y))
-                if nearest_road_km is None or distance_km < nearest_road_km:
-                    nearest_road_km = distance_km
-
-        features.nearest_road_km = nearest_road_km
-
-    osm = records.get("osm-poi")
-    if osm is not None:
-        categories = osm.data.get("categories", {})
-        forests = categories.get("forest", []) or []
-        nearest_poi_km: Optional[float] = None
-
-        for forest in forests:
-            lon, lat = forest.get("lon"), forest.get("lat")
-            if lon is None or lat is None:
-                continue
-            point = Point(lon, lat)
-            if not point.within(cell):
-                continue
-            features.forest_feature_count += 1
-            rating = _classify_forest(forest.get("tags") or {})
-            if rating == "high":
-                features.high_concealment_count += 1
-            elif rating == "medium":
-                features.medium_concealment_count += 1
-
-        for category_id, items in categories.items():
-            if category_id == "forest":
-                continue
-            for item in items:
-                lon, lat = item.get("lon"), item.get("lat")
-                if lon is None or lat is None:
-                    continue
-                distance_km = haversine_km(cell_centroid, (lon, lat))
-                if nearest_poi_km is None or distance_km < nearest_poi_km:
-                    nearest_poi_km = distance_km
-        features.nearest_poi_km = nearest_poi_km
-
-    fmi = records.get("fmi")
-    if fmi is not None:
-        observations = fmi.data.get("observations") or {}
-
-        def _latest(name: str) -> Optional[float]:
-            entry = observations.get(name) or {}
-            value = (entry.get("latest") or {}).get("value")
-            try:
-                return float(value) if value is not None else None
-            except (TypeError, ValueError):
-                return None
-
-        features.weather_temp_c = _latest("temperature")
-        features.weather_wind_ms = _latest("wind_speed")
-        features.weather_gust_ms = _latest("wind_gust")
-        features.weather_precip_mm = _latest("precipitation")
-        features.weather_cloud_pct = _latest("cloud_cover")
-        features.weather_humidity_pct = _latest("humidity")
-
-    opencellid = records.get("opencellid")
-    if opencellid is not None:
-        nearest: Optional[float] = None
-        for cell_record in opencellid.data.get("cells", []) or []:
-            lon, lat = cell_record.get("lon"), cell_record.get("lat")
-            if lon is None or lat is None:
-                continue
-            distance_km = haversine_km(cell_centroid, (lon, lat))
-            point = Point(lon, lat)
-            if point.within(cell):
-                features.cell_tower_count += 1
-            if nearest is None or distance_km < nearest:
-                nearest = distance_km
-        features.nearest_cell_tower_km = nearest
-
-    population = records.get("statistics-finland")
-    if population is not None:
-        total = 0
-        for feature in population.data.get("features", []) or []:
-            geometry = feature.get("geometry")
-            if not geometry:
-                continue
-            try:
-                geom = geojson_to_shape(geometry)
-            except Exception:
-                continue
-            if geom.is_empty or not geom.intersects(cell):
-                continue
-
-            source_pop = int((feature.get("properties") or {}).get("population", 0) or 0)
-            if source_pop <= 0:
-                continue
-            overlap = geom.intersection(cell).area / geom.area if geom.area > 0 else 0
-            total += int(round(source_pop * overlap))
-        features.population_estimate = total
-
-    return features
+# ---------------------------------------------------------------------------
+# Hard-constraint checks
+# ---------------------------------------------------------------------------
 
 
 def check_constraints(

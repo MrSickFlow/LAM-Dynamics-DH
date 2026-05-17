@@ -84,6 +84,17 @@ def get_services():
     return state
 
 
+def _is_bbox_load_target(load_target) -> bool:
+    """True when the load target is a user-drawn bounding box. The satellite
+    overlay only renders for bbox-scoped loads so it doesn't flood the screen
+    when the user is just browsing a named area."""
+    if load_target is None:
+        return False
+    kind = getattr(load_target, "kind", None)
+    kind_value = kind.value if hasattr(kind, "value") else kind
+    return kind_value == "bbox" and bool(getattr(load_target, "bbox_wgs84", None))
+
+
 def _latest_records_by_source(records):
     latest = {}
     for record in records:
@@ -293,16 +304,183 @@ def _clip_population_dataset(record, mask, feature_limit: int = 30):
     }
 
 
+# Sensor swath half-widths (km) keyed by substring of the satellite type string.
+# Used by _clip_satellite_record to decide whether a ground-track point's
+# footprint sweeps the AOI. Values are conservative — actual swath varies with
+# off-nadir angle, but this gives the LLM and UI a faithful first-cut.
+_SAT_SWATH_HALFWIDTH_KM = {
+    "sar": 40.0,          # Sentinel-1, TerraSAR-X, Russian SAR (X/C-band)
+    "kh-11": 30.0,        # Hi-res optical reconnaissance
+    "worldview": 15.0,    # commercial hi-res
+    "kompsat": 20.0,
+    "geoeye": 15.0,
+    "pleiades": 20.0,
+    "sentinel-2": 145.0,  # wide multispectral swath
+    "landsat": 92.5,      # 185 km swath
+    "resurs": 30.0,
+    "kosmos": 30.0,       # Russian military imaging (default)
+}
+_SAT_SWATH_DEFAULT_KM = 50.0
+
+
+def _sat_swath_halfwidth_km(sat_type: str) -> float:
+    t = (sat_type or "").lower()
+    for key, hw in _SAT_SWATH_HALFWIDTH_KM.items():
+        if key in t:
+            return hw
+    return _SAT_SWATH_DEFAULT_KM
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    import math
+    r_lat1, r_lat2 = math.radians(lat1), math.radians(lat2)
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = math.sin(d_lat / 2) ** 2 + math.cos(r_lat1) * math.cos(r_lat2) * math.sin(d_lon / 2) ** 2
+    return 6371.0 * 2 * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _clip_satellite_record(record, mask) -> dict[str, Any]:
+    """Compute satellite overpass windows that intersect the AOI via the
+    sensor's modeled swath. Emits a structured per-satellite pass schedule the
+    LLM and UI can render directly."""
+    from datetime import datetime, timezone, timedelta
+    from ipb_backend.ingestion.sources.satellites import SatelliteTleAdapter
+    from ipb_backend.ingestion.timeframe import forecast_horizon_hours
+
+    # AOI centroid + extent (degrees → rough km radius via the bbox diagonal)
+    minx, miny, maxx, maxy = mask.bounds
+    aoi_lat = (miny + maxy) / 2.0
+    aoi_lon = (minx + maxx) / 2.0
+    aoi_radius_km = max(
+        _haversine_km(aoi_lat, aoi_lon, miny, minx),
+        _haversine_km(aoi_lat, aoi_lon, maxy, maxx),
+    )
+
+    satellites = record.data.get("satellites", {}) or {}
+    query = record.data.get("query", {}) or {}
+    hours = forecast_horizon_hours(
+        record.timeframe or "24h", default=24.0, cap=48.0
+    )
+    now = datetime.now(timezone.utc)
+    window_end = now + timedelta(hours=hours)
+
+    # We need an adapter instance to call compute_ground_track. Build a
+    # lightweight one — it has no per-instance state we depend on.
+    adapter = SatelliteTleAdapter.__new__(SatelliteTleAdapter)
+
+    sat_summaries: list[dict[str, Any]] = []
+    total_passes = 0
+
+    for name, info in satellites.items():
+        tle1 = info.get("tle_line_1", "")
+        tle2 = info.get("tle_line_2", "")
+        if not tle1 or not tle2:
+            continue
+
+        sat_type = info.get("type", "")
+        is_sar = "sar" in sat_type.lower()
+        swath_km = _sat_swath_halfwidth_km(sat_type) + aoi_radius_km
+
+        track = adapter.compute_ground_track(tle1, tle2, now, hours=hours, step_seconds=60)
+        if not track:
+            continue
+
+        # Walk the track, group consecutive in-swath samples into passes.
+        passes: list[dict[str, Any]] = []
+        current: dict[str, Any] | None = None
+        for pt in track:
+            d = _haversine_km(aoi_lat, aoi_lon, pt["lat"], pt["lon"])
+            inside = d <= swath_km
+            if inside:
+                if current is None:
+                    current = {
+                        "start_utc": pt["t_iso"],
+                        "end_utc": pt["t_iso"],
+                        "closest_km": d,
+                        "closest_utc": pt["t_iso"],
+                    }
+                else:
+                    current["end_utc"] = pt["t_iso"]
+                    if d < current["closest_km"]:
+                        current["closest_km"] = d
+                        current["closest_utc"] = pt["t_iso"]
+            elif current is not None:
+                passes.append(current)
+                current = None
+        if current is not None:
+            passes.append(current)
+
+        if not passes:
+            continue
+
+        # Annotate each pass with duration and round closest distance
+        for p in passes:
+            from datetime import datetime as _dt
+            try:
+                dur = (_dt.fromisoformat(p["end_utc"]) - _dt.fromisoformat(p["start_utc"])).total_seconds()
+            except ValueError:
+                dur = 0
+            p["duration_seconds"] = int(dur)
+            p["closest_km"] = round(p["closest_km"], 1)
+
+        sat_summaries.append({
+            "name": name,
+            "type": sat_type,
+            "is_sar": is_sar,
+            "origin": info.get("origin", ""),
+            "swath_halfwidth_km": _sat_swath_halfwidth_km(sat_type),
+            "passes": passes,
+            "pass_count": len(passes),
+            "next_pass_utc": passes[0]["start_utc"],
+        })
+        total_passes += len(passes)
+
+    # Sort satellites by their next pass time
+    sat_summaries.sort(key=lambda s: s["next_pass_utc"])
+
+    return {
+        "summary": record.summary,
+        "provider": record.data.get("provider"),
+        "window": {
+            "start_utc": now.isoformat().replace("+00:00", "Z"),
+            "end_utc": window_end.isoformat().replace("+00:00", "Z"),
+            "hours": hours,
+        },
+        "aoi": {
+            "centroid": [aoi_lat, aoi_lon],
+            "radius_km": round(aoi_radius_km, 1),
+        },
+        "satellites_with_passes": sat_summaries,
+        "total_passes_in_window": total_passes,
+        "satellites_total_tracked": len(satellites),
+        # Also forward the raw catalog for downstream tooling that wants TLE
+        # info, but trim it (no need to ship full TLE bodies to the LLM).
+        "satellites_catalog": {
+            n: {"type": info.get("type"), "origin": info.get("origin"), "norad_id": info.get("norad_id")}
+            for n, info in satellites.items()
+        },
+    }
+
+
 def _clip_weather_record(record, mask):
     station = record.data.get("station", {})
     latitude = station.get("latitude")
     longitude = station.get("longitude")
+    # Forecast + query are always forwarded so the analyzer and LLM context can
+    # reason about the full planning horizon, not just the latest observation.
+    forecast = record.data.get("forecast", {})
+    query = record.data.get("query", {})
+
     if latitude is None or longitude is None:
         return {
             "summary": record.summary,
             "station_count": 0,
             "stations": [],
+            "station": station,
             "observations": record.data.get("observations", {}),
+            "forecast": forecast,
+            "query": query,
         }
 
     station_feature = {
@@ -314,14 +492,19 @@ def _clip_weather_record(record, mask):
         "properties": {
             "name": station.get("name"),
             "region": station.get("region"),
+            "distance_from_bbox_km": station.get("distance_from_bbox_km"),
+            "fallback": station.get("fallback", False),
         },
     }
     clipped = clip_geojson_feature(station_feature, mask)
     return {
         "summary": record.summary,
         "station_count": 1 if clipped else 0,
-        "stations": [clipped] if clipped else [],
+        "stations": [clipped] if clipped else [station_feature],
+        "station": station,
         "observations": record.data.get("observations", {}),
+        "forecast": forecast,
+        "query": query,
     }
 
 
@@ -345,6 +528,8 @@ def _clip_record_for_aoi(record: DatasetRecord, mask, source_name: Optional[str]
         payload = _clip_osm_poi_record(record, mask)
     elif record.data.get("cells"):
         payload = _clip_cell_tower_record(record, mask)
+    elif record.data.get("satellites"):
+        payload = _clip_satellite_record(record, mask)
     elif record.data.get("features") and _is_population_dataset(record):
         payload = _clip_population_dataset(record, mask)
     elif record.data.get("features"):
@@ -729,8 +914,15 @@ async def map_data_osm_poi(
 async def map_data_satellites(area: str = Query("North Karelia"), services=Depends(get_services)):
     records = services["ingestion_service"].records
     record = _record_for_area_or_latest(records, "satellites", area)
-    if record is None:
-        return {"type": "FeatureCollection", "features": [], "available": False}
+    if record is None or not _is_bbox_load_target(record.load_target):
+        # Satellite overlay only renders for bbox-scoped loads — TLE data is
+        # global, but the visual is too cluttered without an AOI focus.
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "available": False,
+            "message": "Satellite overlay activates after a load rectangle is drawn.",
+        }
     satellites = record.data.get("satellites", {})
     query = record.data.get("query", {})
     center_lat = query.get("lat", 62.8)
@@ -768,17 +960,33 @@ async def map_data_satellites(area: str = Query("North Karelia"), services=Depen
 @router.get("/map-data/satellite-tracks")
 async def map_data_satellite_tracks(
     area: str = Query("North Karelia"),
-    hours: float = Query(8.0, description="Hours to project ground tracks forward"),
+    hours: float | None = Query(None, description="Hours to project ground tracks forward"),
+    timeframe: str | None = Query(None, description="Timeframe string (overridden by hours)"),
     services=Depends(get_services),
 ):
     """Ground track corridors for Russian satellites — the core concealment planning layer."""
     from ipb_backend.ingestion.sources.satellites import SatelliteTleAdapter
     from datetime import datetime, timezone
+    from ipb_backend.ingestion.timeframe import forecast_horizon_hours
+
+    # Resolve hours: explicit > timeframe-derived > 8h default. Cap to 24h —
+    # longer tracks alias around the globe and clutter the map.
+    if hours is None:
+        if timeframe:
+            hours = forecast_horizon_hours(timeframe, default=8.0, cap=24.0)
+        else:
+            hours = 8.0
+    hours = max(1.0, min(float(hours), 24.0))
 
     records = services["ingestion_service"].records
     record = _record_for_area_or_latest(records, "satellites", area)
-    if record is None:
-        return {"type": "FeatureCollection", "features": [], "available": False}
+    if record is None or not _is_bbox_load_target(record.load_target):
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "available": False,
+            "message": "Satellite ground tracks activate after a load rectangle is drawn.",
+        }
 
     satellites = record.data.get("satellites", {})
     adapter = services["adapters"].get("satellites")
@@ -836,9 +1044,16 @@ async def map_data_satellite_tracks(
                 },
             })
 
-        # Time-label waypoints every 30 minutes (points list is in 60s steps → step 30)
+        # Time-label waypoints — frequency scales with horizon so labels don't
+        # blanket the map at long timeframes. Points list is in 60s steps.
+        if hours <= 3:
+            label_step = 15
+        elif hours <= 8:
+            label_step = 30
+        else:
+            label_step = 60
         for i, pt in enumerate(points):
-            if i % 30 == 0 and not pt.get("crossing"):
+            if i % label_step == 0 and not pt.get("crossing"):
                 t_label = pt["t_iso"][11:16] + "Z"
                 features.append({
                     "type": "Feature",
@@ -1232,39 +1447,73 @@ async def planning_profiles():
     }
 
 
+# Planning is CPU-bound and runs synchronously in the thread executor — two
+# concurrent runs starve each other and the event loop. Serialise them at the
+# route level so the second caller queues instead of doubling up.
+_planning_lock = asyncio.Lock()
+_PLANNING_TIMEOUT_S = 180.0
+
+
 @router.post("/planning/recommend", response_model=PlanningResponse)
 async def planning_recommend(
     request: PlanningRequest, services=Depends(get_services)
 ) -> PlanningResponse:
+    import logging
+    import time as _time
+    logger = logging.getLogger("ipb_backend.api.planning")
     try:
         records = services["ingestion_service"].records
         latest = _latest_records_by_source(records)
         freshness = _build_freshness(services, latest)
 
-        try:
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                partial(recommend_sites, request, records=list(latest.values()), freshness=freshness),
+        async with _planning_lock:
+            t_start = _time.perf_counter()
+            logger.info(
+                "planning recommend: area=%s grid_res=%s top_n=%s explain=%s",
+                request.area, request.grid_resolution_m, request.top_n, request.explain,
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        if request.explain:
             try:
-                response = await enrich_with_narratives(
-                    response, request.force, request.operation
+                loop = asyncio.get_event_loop()
+                response = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        partial(recommend_sites, request, records=list(latest.values()), freshness=freshness),
+                    ),
+                    timeout=_PLANNING_TIMEOUT_S,
                 )
-            except Exception as exc:
-                response = response.model_copy(
-                    update={
-                        "notes": response.notes
-                        + [f"Explainer disabled due to error: {exc}"]
-                    }
-                )
+            except asyncio.TimeoutError as exc:
+                raise HTTPException(
+                    status_code=504,
+                    detail=(
+                        f"Planning exceeded {_PLANNING_TIMEOUT_S:.0f}s. "
+                        "Try a coarser grid (grid_resolution_m) or a smaller AOI."
+                    ),
+                ) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        return response
+            if request.explain:
+                try:
+                    response = await enrich_with_narratives(
+                        response, request.force, request.operation
+                    )
+                except Exception as exc:
+                    logger.warning("planning explainer failed: %s", exc)
+                    response = response.model_copy(
+                        update={
+                            "notes": response.notes
+                            + [f"Explainer disabled due to error: {exc}"]
+                        }
+                    )
+
+            logger.info(
+                "planning recommend done: cells=%d feasible=%d top_n=%d in %.1fs",
+                response.cells_evaluated, response.feasible_cells, len(response.top_sites),
+                _time.perf_counter() - t_start,
+            )
+            return response
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("planning recommend failed")
         raise HTTPException(status_code=500, detail=f"Planning failed: {exc}") from exc

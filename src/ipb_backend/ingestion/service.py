@@ -1,22 +1,41 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
+from typing import Optional
 
 from ipb_backend.ingestion.base import SourceAdapter
 from ipb_backend.ingestion.registry import SourceRegistry
-from ipb_backend.models import IngestionRequest, IngestionResult, SourceStatus
+from ipb_backend.models import DatasetRecord, IngestionRequest, IngestionResult, LoadTarget, SourceStatus
+
+
+def _load_target_key(load_target: Optional[LoadTarget]) -> str:
+    """Stable signature for deduplication. Same target → same key."""
+    if load_target is None:
+        return "named"
+    payload = {
+        "kind": load_target.kind.value if hasattr(load_target.kind, "value") else load_target.kind,
+        "label": load_target.label,
+        "bbox": load_target.bbox_wgs84,
+        "geom": load_target.geometry,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 class IngestionService:
     def __init__(self, registry: SourceRegistry, adapters: dict[str, SourceAdapter]) -> None:
         self._registry = registry
         self._adapters = adapters
-        self._records = []
+        # Keyed by (source_id, area, load_target_signature) so repeated ingests
+        # for the same scope overwrite rather than accumulate. Timeframe is
+        # intentionally NOT part of the key — the latest record per scope wins,
+        # which matches "Load Data" UX.
+        self._records: dict[tuple[str, str, str], DatasetRecord] = {}
 
     @property
-    def records(self):
-        return list(self._records)
+    def records(self) -> list[DatasetRecord]:
+        return list(self._records.values())
 
     async def ingest(self, request: IngestionRequest) -> IngestionResult:
         source_ids = request.source_ids or self._registry.enabled_source_ids()
@@ -30,7 +49,9 @@ class IngestionService:
             for source_id in source_ids
         ]
         records = [r for r in await asyncio.gather(*tasks) if r is not None]
-        self._records.extend(records)
+        lt_key = _load_target_key(request.load_target)
+        for record in records:
+            self._records[(record.source_id, record.area, lt_key)] = record
         return IngestionResult(requested_sources=source_ids, produced_records=records)
 
     async def _fetch_one_timed(self, source_id: str, area: str, timeframe: str, load_target=None):
@@ -57,6 +78,11 @@ class IngestionService:
         self._registry.update(definition.model_copy(update={"status": SourceStatus.RUNNING}))
         try:
             record = await adapter.fetch(area, timeframe, load_target)
+            # Attach the load_target so downstream readers (gate satellite
+            # overlays to bbox loads, distinguish per-bbox vs per-area records)
+            # don't have to re-derive it from the request payload.
+            if record is not None and record.load_target is None and load_target is not None:
+                record = record.model_copy(update={"load_target": load_target})
             updated_definition = definition.model_copy(
                 update={
                     "status": SourceStatus.READY,

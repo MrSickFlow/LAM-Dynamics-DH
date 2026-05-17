@@ -79,6 +79,29 @@ def timeframe_hours(timeframe: str) -> float:
     return (end - start).total_seconds() / 3600.0
 
 
+def forecast_horizon_hours(timeframe: str, *, default: float = 24.0, cap: float = 48.0) -> float:
+    """Return the forward planning horizon in hours for a timeframe string.
+
+    Snapshot mode collapses to ``default``. Relative formats (``24h``/``7d``)
+    return their span. Absolute ranges return ``end - now`` (or 0 if entirely
+    in the past). The result is clamped to ``[0, cap]`` so callers don't ask
+    weather/satellite providers for horizons they cannot deliver.
+    """
+    tf = (timeframe or "").strip().lower()
+    if tf in ("", "now", "snapshot", "latest"):
+        return min(default, cap)
+
+    if "/" in tf:
+        _, end = parse_timeframe(tf, forward=False)
+        now = datetime.now(timezone.utc)
+        ahead = (end - now).total_seconds() / 3600.0
+        return max(0.0, min(ahead, cap))
+
+    start, end = parse_timeframe(tf, forward=True)
+    span = (end - start).total_seconds() / 3600.0
+    return max(0.0, min(span, cap))
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
