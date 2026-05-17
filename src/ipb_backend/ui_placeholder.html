@@ -1391,6 +1391,7 @@
       weatherRecord: null,
       weatherMarker: null,
       pointMarker: null,
+      losLines: null,
       weatherPickerActive: false,
       pointInspectorActive: false,
       satelliteFootprint: null,
@@ -2385,9 +2386,33 @@
         state.pointSnapshot = await resp.json();
 
         if (state.pointMarker) state.map.removeLayer(state.pointMarker);
+        if (state.losLines) { state.map.removeLayer(state.losLines); state.losLines = null; }
+
         state.pointMarker = L.circleMarker([lat, lng], {
           radius: 10, fillColor: "#195d85", color: "#fff", weight: 3, fillOpacity: 0.85,
         }).addTo(state.map).bindPopup(`<b>Point Inspector</b><br>${state.pointSnapshot.summary}`).openPopup();
+
+        // Draw LOS lines
+        const los = state.pointSnapshot.los;
+        if (los && los.available && Array.isArray(los.directions)) {
+          const group = L.layerGroup();
+          const R_EARTH = 6371000;
+          los.directions.forEach((d) => {
+            const dist = d.clear_range_m;
+            const azRad = (d.azimuth_deg * Math.PI) / 180;
+            const dLat = (Math.cos(azRad) * dist) / R_EARTH * (180 / Math.PI);
+            const dLon = (Math.sin(azRad) * dist) / (R_EARTH * Math.cos(lat * Math.PI / 180)) * (180 / Math.PI);
+            const endLat = lat + dLat;
+            const endLng = lng + dLon;
+            L.polyline([[lat, lng], [endLat, endLng]], {
+              color: d.obstructed ? "#c46c32" : "#2a7a5a",
+              weight: 2,
+              opacity: 0.8,
+              dashArray: d.obstructed ? "6 4" : null,
+            }).addTo(group);
+          });
+          state.losLines = group.addTo(state.map);
+        }
 
         renderPointInspect(state.pointSnapshot);
         statusLine.textContent = `Point snapshot complete for (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
@@ -3115,6 +3140,7 @@
       state.weatherPickerActive = false;
       state.pointInspectorActive = false;
       if (state.pointMarker) { state.map.removeLayer(state.pointMarker); state.pointMarker = null; }
+      if (state.losLines) { state.map.removeLayer(state.losLines); state.losLines = null; }
       const pointSnapshotSection = document.getElementById("point-snapshot-section");
       if (pointSnapshotSection) pointSnapshotSection.style.display = "none";
       if (pointInspectorBtn) { pointInspectorBtn.textContent = "Point Inspector"; pointInspectorBtn.style.background = ""; pointInspectorBtn.style.color = ""; }
@@ -3432,9 +3458,9 @@
       pointInspectorBtn.textContent = state.pointInspectorActive ? "Cancel Inspector" : "Point Inspector";
       pointInspectorBtn.style.background = state.pointInspectorActive ? "var(--accent-3)" : "";
       pointInspectorBtn.style.color = state.pointInspectorActive ? "#fff" : "";
-      if (!state.pointInspectorActive && state.pointMarker) {
-        state.map.removeLayer(state.pointMarker);
-        state.pointMarker = null;
+      if (!state.pointInspectorActive) {
+        if (state.pointMarker) { state.map.removeLayer(state.pointMarker); state.pointMarker = null; }
+        if (state.losLines) { state.map.removeLayer(state.losLines); state.losLines = null; }
       }
       state.map.getContainer().style.cursor = state.pointInspectorActive ? "crosshair" : "";
       if (state.pointInspectorActive) {
