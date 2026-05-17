@@ -1943,7 +1943,7 @@
 
       setCustomLoadTarget(bbox);
       clearSelection();
-      statusLine.textContent = "Custom load area selected. Click Load Data to fetch datasets for that rectangle.";
+      bootstrapWorkspace();
     }
 
     function startDrawing(latlng) {
@@ -3405,13 +3405,13 @@
     areaSelect.addEventListener("change", () => {
       setNamedAreaLoadTarget(areaSelect.value);
       clearSelection();
-      statusLine.textContent = "Preset area selected. Click Load Data to fetch datasets.";
+      bootstrapWorkspace();
     });
 
     usePresetBtn.addEventListener("click", () => {
       setNamedAreaLoadTarget(areaSelect.value);
       clearSelection();
-      statusLine.textContent = "Preset area selected. Click Load Data to fetch datasets.";
+      bootstrapWorkspace();
     });
 
     drawLoadAreaBtn.addEventListener("click", () => {
