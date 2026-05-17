@@ -3,24 +3,53 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from datetime import datetime, timezone
 from typing import Optional
 
 from ipb_backend.ingestion.base import SourceAdapter
 from ipb_backend.ingestion.registry import SourceRegistry
-from ipb_backend.models import DatasetRecord, IngestionRequest, IngestionResult, LoadTarget, SourceStatus
+from ipb_backend.models import DatasetRecord, IngestionRequest, IngestionResult, LoadTarget, LoadTargetKind, SourceStatus
 
 
 def _load_target_key(load_target: Optional[LoadTarget]) -> str:
-    """Stable cache/dedup key. Same load target → same key regardless of timeframe."""
+    """Storage signature for deduplication.
+
+    Named-area loads are stable and can be retained per area. Volatile custom
+    bbox/geometry loads are collapsed to the latest record for that source and
+    area so repeated viewport changes do not grow the in-memory cache without
+    bound.
+    """
     if load_target is None:
         return "named"
+    if load_target.kind in {LoadTargetKind.BBOX, LoadTargetKind.GEOMETRY}:
+        return load_target.kind.value
     payload = {
         "kind": load_target.kind.value if hasattr(load_target.kind, "value") else load_target.kind,
-        "bbox": load_target.bbox_wgs84,
-        "geom": load_target.geometry,
+        "label": load_target.label,
     }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _fetch_cache_key(area: str, timeframe: str, load_target: Optional[LoadTarget]) -> str:
+    """Exact request signature for short-lived fetch caching.
+
+    Unlike storage dedupe, fetch caching must distinguish different AOIs and
+    timeframes so a fresh request never reuses a mismatched prior response.
+    """
+    if load_target is None:
+        payload = {"area": area, "timeframe": timeframe, "target": None}
+    else:
+        payload = {
+            "area": area,
+            "timeframe": timeframe,
+            "target": {
+                "kind": load_target.kind.value if hasattr(load_target.kind, "value") else load_target.kind,
+                "label": load_target.label,
+                "bbox": load_target.bbox_wgs84,
+                "geom": load_target.geometry,
+            },
+        }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
@@ -31,8 +60,9 @@ def _record_storage_key(record: DatasetRecord) -> tuple[str, str, str]:
 class _RecordStore:
     """Deduplicated record storage with list-like helpers for tests/admin use."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_clear: Callable[[], None] | None = None) -> None:
         self._by_key: dict[tuple[str, str, str], DatasetRecord] = {}
+        self._on_clear = on_clear
 
     def __setitem__(self, key: tuple[str, str, str], record: DatasetRecord) -> None:
         self._by_key[key] = record
@@ -42,9 +72,15 @@ class _RecordStore:
 
     def clear(self) -> None:
         self._by_key.clear()
+        if self._on_clear is not None:
+            self._on_clear()
 
     def append(self, record: DatasetRecord) -> None:
-        self._by_key[_record_storage_key(record)] = record
+        key = _record_storage_key(record)
+        # Updating an existing key should count as the newest value so callers
+        # that walk records in insertion order still see the latest volatile AOI.
+        self._by_key.pop(key, None)
+        self._by_key[key] = record
 
     def extend(self, records: Iterable[DatasetRecord]) -> None:
         for record in records:
@@ -56,20 +92,19 @@ class _RecordStore:
     def __len__(self) -> int:
         return len(self._by_key)
 
-
 class IngestionService:
     def __init__(self, registry: SourceRegistry, adapters: dict[str, SourceAdapter]) -> None:
         self._registry = registry
         self._adapters = adapters
+        self._fetch_cache: dict[tuple[str, str], tuple[float, DatasetRecord]] = {}
         # Keyed by (source_id, area, load_target_signature) so repeated ingests
         # for the same scope overwrite rather than accumulate. Timeframe is
         # intentionally NOT part of the key — the latest record per scope wins,
         # which matches "Load Data" UX.
-        self._records = _RecordStore()
+        self._records = _RecordStore(on_clear=self._fetch_cache.clear)
         # Fetch cache: (source_id, lt_key) → (expires_at_monotonic, DatasetRecord)
         # TTL comes from each source's refresh_interval_seconds so we never serve
         # data staler than a background refresh would produce.
-        self._fetch_cache: dict[tuple[str, str], tuple[float, DatasetRecord]] = {}
 
     @property
     def records(self) -> list[DatasetRecord]:
@@ -108,7 +143,6 @@ class IngestionService:
         # Rebuild spatial index so point-inspection queries stay O(log n).
         from ipb_backend.spatial import nearby_index
         nearby_index.rebuild(list(self._records.values()))
-
         return IngestionResult(requested_sources=source_ids, produced_records=records)
 
     async def _fetch_one_timed(self, source_id: str, area: str, timeframe: str, load_target=None):
@@ -132,8 +166,8 @@ class IngestionService:
         if adapter is None:
             raise ValueError(f"No adapter configured for source id: {source_id}")
 
-        lt_key = _load_target_key(load_target)
-        cached = self._cache_get(source_id, lt_key)
+        cache_key = _fetch_cache_key(area, timeframe, load_target)
+        cached = self._cache_get(source_id, cache_key)
         if cached is not None:
             self._registry.update(definition.model_copy(
                 update={"status": SourceStatus.READY, "last_error": None}
@@ -153,7 +187,7 @@ class IngestionService:
                 }
             ))
             if record is not None:
-                self._cache_put(source_id, lt_key, record)
+                self._cache_put(source_id, cache_key, record)
             return record
         except Exception as exc:
             self._registry.update(definition.model_copy(

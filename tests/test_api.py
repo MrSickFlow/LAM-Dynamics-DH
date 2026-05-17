@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from ipb_backend.analysis.analyzers import OllamaAnalyzer
@@ -10,7 +12,7 @@ from ipb_backend.ingestion.sources.satellites import SatelliteTleAdapter
 from ipb_backend.ingestion.sources.statistics_finland import StatisticsFinlandAdapter
 from ipb_backend.main import app
 from ipb_backend.main import state
-from ipb_backend.models import DatasetRecord, SourceCategory
+from ipb_backend.models import DatasetRecord, IngestionRequest, LoadTarget, LoadTargetKind, SourceCategory
 from ipb_backend.config import settings
 
 
@@ -266,11 +268,115 @@ def test_ingest_accepts_bbox_load_target(monkeypatch):
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     payload = response.json()
-    assert payload["requested_sources"] == ["osm-poi"]
-    assert payload["produced_records"][0]["area"] == "Custom Load Area"
-    assert payload["produced_records"][0]["load_target"]["kind"] == "bbox"
+    assert payload["status"] == "started"
+    assert payload["source_ids"] == ["osm-poi"]
+
+    records = [
+        record
+        for record in state["ingestion_service"].records
+        if record.source_id == "osm-poi" and record.area == "Custom Load Area"
+    ]
+    assert len(records) == 1
+    assert records[0].load_target is not None
+    assert records[0].load_target.kind.value == "bbox"
+
+
+def test_ingestion_service_replaces_stale_bbox_records(monkeypatch):
+    service = state["ingestion_service"]
+    service._records.clear()
+
+    async def fake_fetch(self, area, timeframe, load_target=None):
+        assert load_target is not None
+        return DatasetRecord(
+            source_id="osm-poi",
+            category=SourceCategory.OTHER,
+            area=area,
+            timeframe=timeframe,
+            load_target=load_target,
+            summary=f"OSM POIs for {load_target.bbox_wgs84}",
+            data={
+                "categories": {
+                    "education": [
+                        {
+                            "lat": 62.61,
+                            "lon": 29.78,
+                            "tags": {"name": "School"},
+                        }
+                    ]
+                },
+                "total_features": 1,
+            },
+        )
+
+    monkeypatch.setattr(OsmPoiAdapter, "fetch", fake_fetch)
+
+    first = IngestionRequest(
+        area="Custom Load Area",
+        timeframe="24h",
+        source_ids=["osm-poi"],
+        load_target=LoadTarget(
+            kind=LoadTargetKind.BBOX,
+            label="Custom Load Area",
+            bbox_wgs84=[29.9, 62.4, 30.2, 62.7],
+        ),
+    )
+    second = IngestionRequest(
+        area="Custom Load Area",
+        timeframe="24h",
+        source_ids=["osm-poi"],
+        load_target=LoadTarget(
+            kind=LoadTargetKind.BBOX,
+            label="Custom Load Area",
+            bbox_wgs84=[30.0, 62.5, 30.3, 62.8],
+        ),
+    )
+
+    asyncio.run(service.ingest(first))
+    asyncio.run(service.ingest(second))
+
+    records = [
+        record
+        for record in service.records
+        if record.source_id == "osm-poi" and record.area == "Custom Load Area"
+    ]
+    assert len(records) == 1
+    assert records[0].load_target is not None
+    assert records[0].load_target.bbox_wgs84 == [30.0, 62.5, 30.3, 62.8]
+
+
+def test_ingestion_service_refetches_when_timeframe_changes(monkeypatch):
+    service = state["ingestion_service"]
+    service._records.clear()
+    calls: list[str] = []
+
+    async def fake_fetch(self, area, timeframe, load_target=None):
+        calls.append(timeframe)
+        return DatasetRecord(
+            source_id="fmi",
+            category=SourceCategory.WEATHER,
+            area=area,
+            timeframe=timeframe,
+            load_target=load_target,
+            summary=f"Weather for {timeframe}",
+            data={"observations": {}},
+        )
+
+    monkeypatch.setattr(FmiAdapter, "fetch", fake_fetch)
+
+    asyncio.run(service.ingest(IngestionRequest(area="North Karelia", timeframe="6h", source_ids=["fmi"])))
+    asyncio.run(service.ingest(IngestionRequest(area="North Karelia", timeframe="24h", source_ids=["fmi"])))
+
+    assert calls == ["6h", "24h"]
+
+    records = [
+        record
+        for record in service.records
+        if record.source_id == "fmi" and record.area == "North Karelia"
+    ]
+    assert len(records) == 1
+    assert records[0].timeframe == "24h"
 
 
 def test_fmi_ingestion_flow(monkeypatch):
