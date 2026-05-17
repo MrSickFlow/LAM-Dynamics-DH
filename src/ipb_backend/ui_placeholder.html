@@ -3845,23 +3845,18 @@
           if (allDone) break;
         }
 
-        // Wait for any in-flight overlay fetches, then inspect.
+        // Wait for any in-flight overlay fetches, then leave AOI inspection as
+        // an explicit user action so startup only loads datasets once.
         await Promise.all(overlayPromises);
         renderFreshness(state.sources);
 
         if (state.selectionGeometry) {
           await inspectSelection(state.selectionGeometry);
-        } else if (state.loadTarget?.kind === "bbox" && state.loadTarget.bbox_wgs84) {
-          const [w, s, e, n] = state.loadTarget.bbox_wgs84;
-          const bboxGeometry = {
-            type: "Polygon",
-            coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]],
-          };
-          state.selectionGeometry = bboxGeometry;
-          await inspectSelection(bboxGeometry);
         } else if (state.sources.length) {
           renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
-          statusLine.textContent = "Datasets ready. Shift + drag on the map to inspect an AOI.";
+          statusLine.textContent = state.loadTarget?.kind === "bbox"
+            ? "Datasets ready. Shift + drag inside the loaded rectangle to inspect an AOI."
+            : "Datasets ready. Shift + drag on the map to inspect an AOI.";
         }
       } catch (error) {
         console.error("Load failed:", error);
