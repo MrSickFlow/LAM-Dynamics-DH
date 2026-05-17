@@ -201,6 +201,26 @@ def _normalize_lines(value: Any) -> list[str]:
     return []
 
 
+INTSUM_SECTION_KEYS = [
+    "situation_overview",
+    "terrain_observation", "terrain_approach", "terrain_key", "terrain_obstacles", "terrain_cover",
+    "weather_impact", "infrastructure", "civil_considerations",
+    "ccir_answers", "assessment", "limitations",
+]
+
+
+def _parse_intsum_response(text: str) -> dict[str, str]:
+    cleaned = _strip_code_fence(text)
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Fallback — return the whole thing as the assessment
+        return {key: "" for key in INTSUM_SECTION_KEYS} | {"assessment": cleaned[:2000]}
+    if not isinstance(payload, dict):
+        return {key: "" for key in INTSUM_SECTION_KEYS} | {"assessment": str(payload)[:2000]}
+    return {key: str(payload.get(key) or "").strip() for key in INTSUM_SECTION_KEYS}
+
+
 def _parse_llm_response(text: str) -> dict[str, Any]:
     cleaned = _strip_code_fence(text)
     try:
@@ -648,8 +668,72 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
             "output": structured_output.model_dump(mode="json"),
         }
 
-    async def _call_api(self, system: str, messages: list[dict[str, Any]]) -> str:
-        async with httpx.AsyncClient(timeout=45.0) as client:
+    async def generate_intsum(
+        self,
+        *,
+        data_package: dict[str, Any],
+        raw_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generate a structured INTSUM (Intelligence Summary) for the AOI."""
+        if not raw_data:
+            raw_data = _build_raw_data_from_package(data_package)
+        data_text = _format_data_for_prompt(raw_data, data_package)
+        sel = data_package.get("selection") or {}
+        area_sqkm = sel.get("area_sqkm", 0)
+        label = sel.get("label") or "Unnamed AOI"
+        bounds = sel.get("bounds_wgs84", [])
+
+        system_prompt = (
+            "You are a NATO intelligence officer drafting a formal INTSUM (Intelligence Summary). "
+            "Write in clean military prose — concise, declarative sentences, present tense. "
+            "Use OAKOC for terrain. Use PMESII-PT considerations for civil factors where relevant. "
+            "Cite specific quantities and named features from the data. Never invent facts. "
+            "Each section should stand on its own as professional intelligence product text — no headings, no bullets "
+            "unless explicitly listed in the schema. Write paragraphs. Be specific, not generic."
+        )
+
+        user_prompt = (
+            f"AREA OF INTEREST: {label}, {area_sqkm:.1f} km²"
+            + (f"\nBOUNDS (WGS84 W,S,E,N): {', '.join(f'{b:.4f}' for b in bounds)}" if bounds else "")
+            + "\n\nINTELLIGENCE INPUTS:\n"
+            + data_text
+            + "\n\nProduce an INTSUM. Return JSON with these keys (each value is a string of flowing prose, "
+            "2-5 sentences per section unless noted):\n\n"
+            "- situation_overview: Single-paragraph characterization of the AOI's overall operational profile.\n"
+            "- terrain_observation: Observation & fields of fire — what can be seen, where lines of sight open or close.\n"
+            "- terrain_approach: Avenues of approach — how forces could move into/through this area.\n"
+            "- terrain_key: Key terrain — features whose seizure/retention gives marked advantage.\n"
+            "- terrain_obstacles: Natural and man-made obstacles to movement.\n"
+            "- terrain_cover: Cover and concealment — where forces can hide from observation and fire.\n"
+            "- weather_impact: Current weather and its operational impact on UAS, mobility, optics, personnel.\n"
+            "- infrastructure: Critical infrastructure assessment — power, fuel, transport, communications, logistics nodes. "
+            "Name specific facilities where data provides names.\n"
+            "- civil_considerations: Population, civilian density, CIVCAS risk, ROE implications.\n"
+            "- ccir_answers: Answers to four standard CCIRs as a single string with each on a new line. "
+            "Format each as 'CCIR-N: [question] — [answer]'. Use:\n"
+            "  CCIR-1: Are enemy forces present or capable of operating in this AOI?\n"
+            "  CCIR-2: What infrastructure could be commandeered, denied, or destroyed?\n"
+            "  CCIR-3: What restrictions does terrain and weather impose on friendly operations?\n"
+            "  CCIR-4: What civilian considerations constrain ROE?\n"
+            "- assessment: Analyst's synthesized conclusion — 3-5 sentences answering 'so what?' for a commander.\n"
+            "- limitations: Genuine intelligence gaps and data limitations affecting this assessment."
+        )
+
+        try:
+            text = await self._call_api(system_prompt, [{"role": "user", "content": user_prompt}], max_tokens=3500)
+        except Exception as exc:
+            raise ValueError(f"Claude INTSUM call failed: {exc}") from exc
+
+        sections = _parse_intsum_response(text)
+        return {
+            "provider": self.provider_name,
+            "status": "ready",
+            "model": settings.anthropic_model,
+            "sections": sections,
+        }
+
+    async def _call_api(self, system: str, messages: list[dict[str, Any]], max_tokens: int = 2000) -> str:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -659,13 +743,160 @@ class ClaudeAnalyzer(EvidenceAnalyzer):
                 },
                 json={
                     "model": settings.anthropic_model,
-                    "max_tokens": 2000,
+                    "max_tokens": max_tokens,
                     "system": system,
                     "messages": messages,
                 },
             )
             resp.raise_for_status()
             return resp.json()["content"][0]["text"]
+
+
+# ─── INTSUM fallback ───────────────────────────────────────────────────────────
+
+def _rules_intsum_sections(data_package: dict[str, Any], raw_data: dict[str, Any]) -> dict[str, str]:
+    """Deterministic INTSUM section generator used when Claude is unavailable."""
+    sel = data_package.get("selection") or {}
+    area_sqkm = float(sel.get("area_sqkm") or 0)
+    nls = raw_data.get("nls", {})
+    col_map = {c.get("collection", ""): c.get("count", 0) for c in nls.get("collections", [])}
+    osm = raw_data.get("osm-poi", {})
+    osm_col = {c.get("collection", ""): c.get("count", 0) for c in osm.get("collections", [])}
+    pop = (raw_data.get("statistics-finland", {}) or {}).get("population_total", 0) or 0
+    cells = (raw_data.get("opencellid", {}) or {}).get("feature_count", 0) or 0
+    digi = (raw_data.get("digiroad", {}) or {}).get("feature_count", 0) or 0
+    fmi_obs = (raw_data.get("fmi", {}) or {}).get("observations", {}) or {}
+
+    def _w(name):
+        v = (fmi_obs.get(name) or {}).get("latest", {}).get("value")
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    forest = col_map.get("metsamaankasvillisuus", 0)
+    bog = col_map.get("suo", 0)
+    water = col_map.get("jarvi", 0) + col_map.get("virtavesialue", 0)
+    rocky = col_map.get("kallioalue", 0)
+    roads = col_map.get("tieviiva", 0)
+    builds = col_map.get("rakennus", 0) + col_map.get("taajaanrakennettualue", 0)
+    open_land = col_map.get("maatalousmaa", 0)
+
+    overview = (
+        f"AOI covers {area_sqkm:.1f} km² of northern Karelian terrain. "
+        f"Dominant features: {'forested' if forest else 'limited forest cover'}, "
+        f"{'extensive water obstacles' if water > 5 else 'minimal hydrography'}, "
+        f"{'significant bog/wetland' if bog else 'firm ground'}. "
+        f"Population {int(pop)}, {digi} road infrastructure features. "
+        f"Civilian comms baseline: {cells} cell towers."
+    )
+    obs = (
+        f"Forest density ({forest} features) limits long-range observation in wooded sectors. "
+        f"{'Open agricultural belts provide cleared fields of fire.' if open_land else 'Few clearings for unobstructed observation.'} "
+        f"{'Rocky elevation provides natural overwatch positions.' if rocky else ''}"
+    ).strip()
+    approach = (
+        f"{roads} road segments form primary avenues of approach. "
+        f"{'Water obstacles channel cross-country movement to bridge crossings.' if water else 'Few water-imposed routing constraints.'} "
+        f"{'Bog terrain blocks heavy off-road movement.' if bog else ''}"
+    ).strip()
+    key_t = (
+        f"Road junctions, bridge crossings ({digi} Digiroad features), "
+        f"{'airfield/port nodes' if osm_col.get('airfields') or osm_col.get('ports_terminals') else 'no aviation/maritime hubs'}, "
+        f"and built-up areas ({builds} features) constitute key terrain."
+    )
+    obstacles = (
+        f"Water: {water} hydrographic features. Bog: {bog} features. "
+        f"Forest density and rocky terrain impose vehicle mobility constraints in {forest + rocky} feature areas."
+    )
+    cover = (
+        f"Forest cover ({forest} features) provides concealment corridors. "
+        f"{'Built-up areas offer urban cover.' if builds else ''} "
+        f"{'Open terrain offers minimal concealment.' if open_land and not forest else ''}"
+    ).strip()
+
+    wind = _w("wind_speed"); temp = _w("temperature"); precip = _w("precipitation"); cloud = _w("cloud_cover")
+    weather_parts = []
+    if wind is not None:
+        if wind > 10:
+            weather_parts.append(f"Wind {wind:.0f} m/s — UAS operations not feasible.")
+        elif wind > 7:
+            weather_parts.append(f"Wind {wind:.0f} m/s — small UAS degraded.")
+        else:
+            weather_parts.append(f"Wind {wind:.0f} m/s — UAS feasible.")
+    if temp is not None:
+        weather_parts.append(f"Temperature {temp:.0f}°C{'  (cold-weather precautions)' if temp < 0 else ''}.")
+    if precip is not None and precip > 0:
+        weather_parts.append(f"Precipitation {precip:.1f} mm/h — sensor degradation, mobility reduced.")
+    if cloud is not None and cloud > 70:
+        weather_parts.append(f"Cloud cover {cloud:.0f}% — satellite/aerial collection degraded.")
+    weather = " ".join(weather_parts) or "Weather data not available."
+
+    infra_parts = [f"{digi} road and bridge features (Digiroad)."]
+    if osm_col.get("power_infrastructure"):
+        infra_parts.append(f"Power infrastructure: {osm_col['power_infrastructure']} features (substations, lines).")
+    if osm_col.get("fuel_supply"):
+        infra_parts.append(f"Fuel supply: {osm_col['fuel_supply']} stations.")
+    if osm_col.get("airfields"):
+        infra_parts.append(f"Aviation: {osm_col['airfields']} airfield features.")
+    if osm_col.get("logistics"):
+        infra_parts.append(f"Logistics nodes: {osm_col['logistics']} features (depots, sawmills, agrarian supply).")
+    if osm_col.get("ports_terminals"):
+        infra_parts.append(f"Transport hubs: {osm_col['ports_terminals']} features.")
+    if cells:
+        infra_parts.append(f"Civilian comms: {cells} cell towers.")
+    infra = " ".join(infra_parts)
+
+    if pop < 100:
+        civil = f"Population {int(pop)} — minimal civilian presence; low CIVCAS risk."
+    elif pop < 2000:
+        civil = f"Population {int(pop)} — moderate civilian presence; CIVCAS precautions required."
+    else:
+        civil = f"Population {int(pop)} — significant civilian population; urban ROE apply; civilian protection is a primary constraint."
+
+    ccir = (
+        "CCIR-1: Are enemy forces present? — No direct indicators from OSINT inputs.\n"
+        "CCIR-2: What infrastructure could be commandeered, denied, or destroyed? — " +
+        (f"{osm_col.get('logistics', 0)} logistics nodes, {osm_col.get('fuel_supply', 0)} fuel, "
+         f"{osm_col.get('power_infrastructure', 0)} power features identified." if osm else "Infrastructure data limited.") + "\n"
+        "CCIR-3: Restrictions imposed by terrain and weather? — " +
+        (f"{'High wind' if wind and wind > 10 else 'Operationally permissive weather'}; "
+         f"{'water obstacles channel movement' if water else 'open routing'}.") + "\n"
+        "CCIR-4: ROE constraints from civil considerations? — " +
+        (f"{'High CIVCAS risk' if pop > 2000 else 'Low to moderate CIVCAS risk'}, "
+         f"{int(pop)} residents in AOI.")
+    )
+
+    assessment = (
+        f"This {area_sqkm:.1f} km² AOI presents a mixed terrain profile suited for "
+        f"{'concealed dismounted operations' if forest else 'exposed mounted operations'}. "
+        f"Mobility is {'constrained by water and bog' if water and bog else 'broadly permissive'}. "
+        f"Weather is {'a limiting factor for air assets' if wind and wind > 10 else 'within operational limits'}. "
+        f"Civilian considerations are {'a primary constraint on ROE' if pop > 2000 else 'manageable'}. "
+        "Recommend further reconnaissance to validate enemy disposition before commitment of force."
+    )
+
+    limitations = (
+        "Assessment based solely on open-source intelligence inputs. "
+        "No HUMINT, SIGINT, or current enemy disposition data integrated. "
+        "Terrain analysis is structural; trafficability requires ground reconnaissance to confirm. "
+        "Weather snapshot only — forecast not integrated."
+    )
+
+    return {
+        "situation_overview": overview,
+        "terrain_observation": obs,
+        "terrain_approach": approach,
+        "terrain_key": key_t,
+        "terrain_obstacles": obstacles,
+        "terrain_cover": cover,
+        "weather_impact": weather,
+        "infrastructure": infra,
+        "civil_considerations": civil,
+        "ccir_answers": ccir,
+        "assessment": assessment,
+        "limitations": limitations,
+    }
 
 
 # ─── RulesAnalyzer (military-aware deterministic fallback) ────────────────────

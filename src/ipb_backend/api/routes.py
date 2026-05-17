@@ -18,13 +18,17 @@ from ipb_backend.agents.power_grid import PowerGridAgent
 from ipb_backend.agents.satellite import SatelliteAgent
 from ipb_backend.agents.weather_impact import WeatherImpactAgent
 from ipb_backend.analysis import (
+    ClaudeAnalyzer,
     RulesAnalyzer,
+    _build_raw_data_from_package,
+    _rules_intsum_sections,
     build_analyzer,
     build_aoi_metrics,
     build_data_package,
     build_evidence_bundle,
     build_raw_sections,
     get_analyzer_health,
+    render_intsum_html,
 )
 from ipb_backend.analysis.contracts import DataPackage
 from ipb_backend.config import settings
@@ -1057,6 +1061,41 @@ async def aoi_interpret(request: LlmInterpretRequest):
         result["status"] = "fallback"
         result["error"] = str(exc)
     return LlmAnalysisOutput.model_validate(result.get("output", {}))
+
+
+@router.post("/aoi/intsum", response_class=HTMLResponse)
+async def aoi_intsum(request: LlmInterpretRequest):
+    """Generate a NATO-style INTSUM document (print-ready HTML) for the AOI."""
+    data_package_dict = request.data_package.model_dump(mode="json")
+    raw_data = _build_raw_data_from_package(data_package_dict)
+
+    provider = "rules"
+    model: Optional[str] = None
+    sections: dict[str, str]
+
+    analyzer = build_analyzer()
+    if isinstance(analyzer, ClaudeAnalyzer):
+        try:
+            result = await analyzer.generate_intsum(
+                data_package=data_package_dict,
+                raw_data=raw_data,
+            )
+            sections = result["sections"]
+            provider = "claude"
+            model = result.get("model")
+        except Exception:
+            sections = _rules_intsum_sections(data_package_dict, raw_data)
+    else:
+        sections = _rules_intsum_sections(data_package_dict, raw_data)
+
+    selection = data_package_dict.get("selection") or {}
+    html = render_intsum_html(
+        sections=sections,
+        selection=selection,
+        provider=provider,
+        model=model,
+    )
+    return HTMLResponse(content=html)
 
 
 @router.get("/analysis/profiles")

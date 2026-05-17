@@ -766,6 +766,21 @@
       font-size: 0.84rem;
     }
 
+    .intsum-btn {
+      background: #4a5040;
+      color: #f4efe2;
+      border: 1px solid #2a2d28;
+      font-family: "Courier New", "Consolas", monospace;
+      font-weight: bold;
+      letter-spacing: 0.1em;
+      padding: 8px 14px;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      border-radius: 2px;
+    }
+    .intsum-btn:hover:not(:disabled) { background: #6b3a1f; border-color: #6b3a1f; color: #f4efe2; }
+    .intsum-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
     .conversation-context {
       display: flex;
       flex-wrap: wrap;
@@ -1414,6 +1429,7 @@
           <div class="conversation-toolbar">
             <label for="analysis-profile">Profile</label>
             <select id="analysis-profile" class="profile-select"></select>
+            <button class="btn btn-secondary intsum-btn" id="generate-intsum-btn" type="button" title="Generate a NATO-style Intelligence Summary document">▣ INTSUM</button>
           </div>
           <div class="conversation-context" id="conversation-context"></div>
           <div class="chat-thread" id="chat-thread"></div>
@@ -1510,6 +1526,7 @@
       weatherMarker: null,
       pointMarker: null,
       losLines: null,
+      intsumPending: false,
       weatherPickerActive: false,
       pointInspectorActive: false,
       satelliteFootprint: null,
@@ -3058,6 +3075,45 @@
       chatInput.disabled = !enabled || state.chatPending;
       chatSendBtn.disabled = !enabled || state.chatPending;
       chatSendBtn.textContent = state.chatPending ? "Thinking..." : "Send";
+      const intsumBtn = document.getElementById("generate-intsum-btn");
+      if (intsumBtn) {
+        intsumBtn.disabled = !enabled || state.intsumPending;
+        intsumBtn.textContent = state.intsumPending ? "⏳ DRAFTING..." : "▣ INTSUM";
+      }
+    }
+
+    async function generateIntsum() {
+      if (!state.latestInspection?.data_package || state.intsumPending) return;
+      state.intsumPending = true;
+      setChatComposerState(true);
+      statusLine.textContent = "Drafting INTSUM — calling AI analyst...";
+      try {
+        const response = await fetch("/api/aoi/intsum", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            data_package: state.latestInspection.data_package,
+            profile: analysisProfile.value || "general",
+          }),
+        });
+        if (!response.ok) throw new Error(`INTSUM generation failed with ${response.status}`);
+        const html = await response.text();
+        const win = window.open("", "_blank", "width=900,height=1100");
+        if (!win) {
+          statusLine.textContent = "INTSUM ready — popup blocked. Allow popups for this site.";
+          return;
+        }
+        win.document.open();
+        win.document.write(html);
+        win.document.close();
+        statusLine.textContent = "INTSUM generated. Use Print / Save as PDF in the new tab.";
+      } catch (e) {
+        console.error("INTSUM failed:", e);
+        statusLine.textContent = `INTSUM generation failed: ${e.message}`;
+      } finally {
+        state.intsumPending = false;
+        setChatComposerState(!!state.latestInspection);
+      }
     }
 
     function renderConversationContext(payload) {
@@ -3727,6 +3783,7 @@
     });
 
     chatSendBtn.addEventListener("click", sendConversationQuestion);
+    document.getElementById("generate-intsum-btn").addEventListener("click", generateIntsum);
     chatInput.addEventListener("keydown", async (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
