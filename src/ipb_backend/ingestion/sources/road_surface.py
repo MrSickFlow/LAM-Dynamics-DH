@@ -5,7 +5,7 @@ import re
 
 from ipb_backend.ingestion.base import SourceAdapter
 from ipb_backend.models import DatasetRecord, SourceCategory, SourceDefinition
-from ipb_backend.spatial import point_in_bbox, resolve_area_bbox
+from ipb_backend.spatial import point_in_bbox, resolve_load_target_bbox, resolve_load_target_label
 
 
 class RoadSurfaceAdapter(SourceAdapter):
@@ -32,7 +32,8 @@ class RoadSurfaceAdapter(SourceAdapter):
         Fetches road surface condition data for a given area.
         The timeframe is ignored as the API provides the latest data.
         """
-        bbox = resolve_area_bbox(area)
+        bbox = resolve_load_target_bbox(area, load_target)
+        area_label = resolve_load_target_label(area, load_target)
 
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             # 1. Fetch all station metadata to get their locations
@@ -90,9 +91,10 @@ class RoadSurfaceAdapter(SourceAdapter):
         return DatasetRecord(
             source_id=self.definition.source_id,
             category=self.definition.category,
-            area=area,
+            area=area_label,
             timeframe=timeframe,
-            summary=self._build_summary(area, len(features)),
+            load_target=load_target,
+            summary=self._build_summary(area_label, len(features)),
             data={
                 "provider": self.definition.name,
                 "query_bbox": f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}",

@@ -1365,6 +1365,7 @@
             <span class="collapse-icon">▾</span>
           </button>
           <div class="panel-card-body" id="overlay-panel-body">
+            <div id="overlay-load-progress" style="display:none;margin-bottom:8px;padding:8px 6px;background:rgba(20,38,29,0.06);border-radius:8px;font-size:0.78rem;line-height:1.7"></div>
             <div class="overlay-list" id="overlay-controls"></div>
           </div>
         </div>
@@ -1648,6 +1649,7 @@
     let _tfMode = "forecast"; // "snapshot" | "forecast"
     let _lastForecastTf = "72h"; // remembered when switching back from snapshot
     let _pendingReload = false;  // user changed timeframe mid-load → re-fire after
+    let _loadGen = 0;            // incremented each load; stale poll loops self-cancel
 
     function setTimeframe(value, triggerLoad = false) {
       timeframeInput.value = value;
@@ -1854,7 +1856,7 @@
     // a specific area — keep it out of the named-area ingest, add it in the
     // bbox ingest so it activates once the user draws a load rectangle.
     const FULL_WORKSPACE_SOURCE_IDS = ["fmi", "nls", "statistics-finland", "digiroad", "opencellid", "osm-poi", "digitraffic-road-surface"];
-    const CUSTOM_LOAD_SOURCE_IDS = ["fmi", "nls", "satellites", "digitraffic-road-surface"];
+    const CUSTOM_LOAD_SOURCE_IDS = ["fmi", "nls", "digiroad", "satellites", "digitraffic-road-surface", "opencellid", "osm-poi"];
     const DEFAULT_VISIBLE_COLLECTIONS = new Set(["rakennus", "jarvi", "virtavesialue", "weather", "celltowers", "satellite-tracks", "bridges", "tunnels", "poi-military", "poi-airfields", "poi-education", "poi-healthcare", "poi-water_sources", "poi-emergency_services", "poi-government", "poi-industry", "poi-logistics", "poi-ports_terminals", "poi-forest", "poi-religion"]);
 
     const COLL_STYLE = {
@@ -1924,6 +1926,7 @@
       return state.workspaceArea || state.bootstrapArea;
     }
 
+
     function currentSourceIds() {
       return state.loadTarget?.kind === "named_area" ? FULL_WORKSPACE_SOURCE_IDS : CUSTOM_LOAD_SOURCE_IDS;
     }
@@ -1975,7 +1978,7 @@
       if (state.map) state.map.setView(getCenter(area), 9);
     }
 
-    function setCustomLoadTarget(bbox, label = "Custom Load Area") {
+    function setCustomLoadTarget(bbox, label = "Custom BBox") {
       state.workspaceArea = label;
       state.loadTarget = {
         kind: "bbox",
@@ -2587,7 +2590,6 @@
       try {
         const response = await fetch(`/api/map-data/nls?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
-        NLS_COLLECTIONS.forEach((c) => state.collectionLayers[c.id]?.clearLayers());
 
         if (geojson.available === false) {
           const message = geojson.message || "NLS vector overlays are unavailable.";
@@ -2609,6 +2611,7 @@
           grouped[collection].push(feature);
         });
 
+        NLS_COLLECTIONS.forEach((c) => state.collectionLayers[c.id]?.clearLayers());
         Object.entries(grouped).forEach(([collection, features]) => {
           const layer = state.collectionLayers[collection];
           if (!layer) return;
@@ -2627,7 +2630,6 @@
       try {
         const response = await fetch(`/api/map-data/osm-poi?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
-        POI_COLLECTIONS.forEach((c) => state.collectionLayers[c.id]?.clearLayers());
         if (geojson.available === false) {
           setLayerAvailability(POI_COLLECTIONS.map((c) => c.id), false, "OSM POI data unavailable.");
           return;
@@ -2640,6 +2642,7 @@
           if (!grouped[collection]) grouped[collection] = [];
           grouped[collection].push(feature);
         });
+        POI_COLLECTIONS.forEach((c) => state.collectionLayers[c.id]?.clearLayers());
         Object.entries(grouped).forEach(([collection, features]) => {
           const layer = state.collectionLayers[collection];
           if (!layer) return;
@@ -2655,14 +2658,15 @@
 
     async function loadCellTowerMapData() {
       try {
-        const response = await fetch(`/api/map-data/opencellid?area=${encodeURIComponent(getWorkspaceArea())}&bbox=${encodeURIComponent(viewportBboxParam())}`);
+        const _cellBbox = state.loadTarget?.kind === "bbox" ? state.loadTarget.bbox_wgs84?.join(",") : viewportBboxParam();
+        const response = await fetch(`/api/map-data/opencellid?area=${encodeURIComponent(getWorkspaceArea())}&bbox=${encodeURIComponent(_cellBbox || "")}`);
         const geojson = await response.json();
-        state.collectionLayers["celltowers"]?.clearLayers();
         if (geojson.available === false) {
           setLayerAvailability(["celltowers"], false, "Cell tower data unavailable.");
           return;
         }
         setLayerAvailability(["celltowers"], true);
+        state.collectionLayers["celltowers"]?.clearLayers();
         state.collectionLayers["celltowers"]?.addData(geojson);
         const checkbox = document.querySelector('input[data-collection="celltowers"]');
         if (!checkbox || checkbox.checked) state.collectionLayers["celltowers"]?.addTo(state.map);
@@ -2676,12 +2680,12 @@
       try {
         const response = await fetch(`/api/map-data/satellites?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
-        state.collectionLayers["satellites"]?.clearLayers();
         if (geojson.available === false) {
           setLayerAvailability(["satellites"], false, geojson.message || "Satellite data unavailable.");
           return;
         }
         setLayerAvailability(["satellites"], true);
+        state.collectionLayers["satellites"]?.clearLayers();
         state.collectionLayers["satellites"]?.addData(geojson);
         const checkbox = document.querySelector('input[data-collection="satellites"]');
         if (!checkbox || checkbox.checked) state.collectionLayers["satellites"]?.addTo(state.map);
@@ -2692,19 +2696,20 @@
     }
 
     function _clipTracksToBbox(geojson, bbox) {
+      // Backend already pre-filtered to a 3° halo; this clips visually to the exact rectangle.
       if (!bbox) return geojson;
       const [w, s, e, n] = bbox;
-      const inside = ([lon, lat]) => lon >= w && lon <= e && lat >= s && lat <= n;
+      // 0.3° padding so tracks entering/exiting the rectangle are visible at the edge
+      const pad = 0.3;
+      const inside = ([lon, lat]) => lon >= w - pad && lon <= e + pad && lat >= s - pad && lat <= n + pad;
 
       const clipped = [];
       for (const feat of geojson.features || []) {
         if (feat.geometry?.type === "Point") {
-          // Keep time-label points only if inside bbox
           if (inside(feat.geometry.coordinates)) clipped.push(feat);
           continue;
         }
         if (feat.geometry?.type !== "LineString") { clipped.push(feat); continue; }
-        // Split the line into segments that stay inside the bbox
         const coords = feat.geometry.coordinates;
         let seg = [];
         for (const pt of coords) {
@@ -2723,9 +2728,9 @@
     async function loadSatelliteTrackData() {
       try {
         const tf = encodeURIComponent(state.timeframe || "24h");
-        const response = await fetch(`/api/map-data/satellite-tracks?area=${encodeURIComponent(getWorkspaceArea())}&timeframe=${tf}`);
+        const bboxParam = state.loadTarget?.kind === "bbox" ? `&bbox=${encodeURIComponent(state.loadTarget.bbox_wgs84.join(","))}` : "";
+        const response = await fetch(`/api/map-data/satellite-tracks?area=${encodeURIComponent(getWorkspaceArea())}&timeframe=${tf}${bboxParam}`);
         const geojson = await response.json();
-        state.collectionLayers["satellite-tracks"]?.clearLayers();
         if (geojson.available === false) {
           setLayerAvailability(["satellite-tracks"], false, geojson.message || "Ground track data unavailable.");
           return;
@@ -2734,6 +2739,7 @@
         const layer = state.collectionLayers["satellite-tracks"];
         if (!layer) return;
         const bbox = state.loadTarget?.kind === "bbox" ? state.loadTarget.bbox_wgs84 : null;
+        layer.clearLayers();
         layer.addData(_clipTracksToBbox(geojson, bbox));
         const checkbox = document.querySelector('input[data-collection="satellite-tracks"]');
         if (!checkbox || checkbox.checked) layer.addTo(state.map);
@@ -2747,7 +2753,6 @@
       try {
         const response = await fetch(`/api/map-data/digiroad?area=${encodeURIComponent(getWorkspaceArea())}`);
         const geojson = await response.json();
-        BRIDGE_COLLECTIONS.forEach((c) => state.collectionLayers[c.id]?.clearLayers());
         if (geojson.available === false) {
           setLayerAvailability(["bridges", "tunnels"], false, "Bridge data unavailable.");
           return;
@@ -2758,6 +2763,7 @@
           const coll = f.properties?._collection;
           if (coll in grouped) grouped[coll].push(f);
         });
+        BRIDGE_COLLECTIONS.forEach((c) => state.collectionLayers[c.id]?.clearLayers());
         Object.entries(grouped).forEach(([coll, features]) => {
           const layer = state.collectionLayers[coll];
           if (!layer) return;
@@ -2773,14 +2779,15 @@
 
     async function loadRoadSurfaceMapData() {
       try {
-        const response = await fetch(`/api/map-data/road-surface?area=${encodeURIComponent(getWorkspaceArea())}&bbox=${encodeURIComponent(viewportBboxParam())}`);
+        const _rsBbox = state.loadTarget?.kind === "bbox" ? state.loadTarget.bbox_wgs84?.join(",") : viewportBboxParam();
+        const response = await fetch(`/api/map-data/road-surface?area=${encodeURIComponent(getWorkspaceArea())}&bbox=${encodeURIComponent(_rsBbox || "")}`);
         const geojson = await response.json();
-        state.collectionLayers["road-surface"]?.clearLayers();
         if (geojson.available === false) {
           setLayerAvailability(["road-surface"], false, "Road surface data unavailable.");
           return;
         }
         setLayerAvailability(["road-surface"], true);
+        state.collectionLayers["road-surface"]?.clearLayers();
         state.collectionLayers["road-surface"]?.addData(geojson);
         const checkbox = document.querySelector('input[data-collection="road-surface"]');
         if (!checkbox || checkbox.checked) state.collectionLayers["road-surface"]?.addTo(state.map);
@@ -3737,9 +3744,14 @@
     }
 
     async function bootstrapWorkspace() {
-      if (state.isLoading) return; // prevent concurrent loads
+      // Bump generation: any in-flight poll loop from a prior load will see its gen
+      // is stale and exit, so the new load always wins.
+      const myGen = ++_loadGen;
+
       if (!state.map) initMap();
       await ensureAnalysisProfilesLoaded();
+      if (myGen !== _loadGen) return; // superseded while awaiting profiles
+
       state.workspaceArea = state.loadTarget?.label || state.bootstrapArea;
       state.pointWeatherData = null;
       state.pointSnapshot = null;
@@ -3764,6 +3776,8 @@
       refreshBtn.textContent = "Loading...";
       statusLine.classList.add("is-loading");
       statusLine.innerHTML = '<span class="status-spinner"></span>Fetching datasets — this takes 30–60 s on first load…';
+      const _prog = document.getElementById("overlay-load-progress");
+      if (_prog) _prog.style.display = "none";
       const weatherPickerToggle = document.querySelector('input[data-action="weather-picker"]');
       if (weatherPickerToggle) weatherPickerToggle.checked = false;
       state.map.getContainer().style.cursor = "";
@@ -3786,7 +3800,44 @@
           throw new Error(`Workspace ingest failed with ${ingestResponse.status}`);
         }
 
-        const enabledIds = new Set((await ingestResponse.json()).requested_sources || []);
+        const enabledIds = new Set((await ingestResponse.json()).source_ids || []);
+        if (myGen !== _loadGen) return; // superseded
+
+        // Unlock the button immediately — overlays will populate progressively.
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = "Load Data";
+        state.isLoading = false;
+
+        const SOURCE_LABELS = {
+          "fmi": "Weather", "nls": "NLS Terrain", "digiroad": "Bridges",
+          "satellites": "Satellites", "opencellid": "Cell Towers",
+          "osm-poi": "POI Layers", "digitraffic-road-surface": "Road Surface",
+          "statistics-finland": "Demographics",
+        };
+        const _progressEl = document.getElementById("overlay-load-progress");
+        const _progressStart = Date.now();
+        const _sourceDoneTimes = {};
+
+        function _renderProgress(sources) {
+          if (!_progressEl) return;
+          const lines = [];
+          for (const sid of enabledIds) {
+            const s = sources.find(x => x.source_id === sid);
+            const status = s?.status || "idle";
+            const label = SOURCE_LABELS[sid] || sid;
+            if (status === "ready") {
+              const secs = _sourceDoneTimes[sid] != null ? ` (${(_sourceDoneTimes[sid]/1000).toFixed(1)}s)` : "";
+              lines.push(`<span style="color:#215347">✓ ${label}${secs}</span>`);
+            } else if (status === "error") {
+              lines.push(`<span style="color:#c0392b">✗ ${label}</span>`);
+            } else {
+              const elapsed = ((Date.now() - _progressStart) / 1000).toFixed(0);
+              lines.push(`<span style="color:#5a6a61"><span class="status-spinner"></span>${label} — ${elapsed}s…</span>`);
+            }
+          }
+          _progressEl.style.display = "block";
+          _progressEl.innerHTML = lines.join("<br>");
+        }
 
         // Map each source to the overlay loader(s) it feeds.
         const SOURCE_LOADERS = {
@@ -3806,6 +3857,7 @@
           fetch("/api/sources"),
           fetch("/api/analysis/health"),
         ]);
+        if (myGen !== _loadGen) return; // superseded
         state.sources = sourcesResp.ok ? await sourcesResp.json() : [];
         state.weatherRecord = weatherResp.ok ? (await weatherResp.json()).record || null : null;
         state.analysisHealth = healthResp.ok ? await healthResp.json() : { provider: "unknown", status: "error" };
@@ -3821,6 +3873,7 @@
 
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 500));
+          if (myGen !== _loadGen) return; // superseded by a newer load
           const pollResp = await fetch("/api/sources");
           if (!pollResp.ok) break;
           const sources = await pollResp.json();
@@ -3831,6 +3884,9 @@
             if (!enabledIds.has(s.source_id)) continue;
             const isDone = s.status !== "idle" && s.status !== "running";
             if (isDone) doneCount++;
+            if (isDone && _sourceDoneTimes[s.source_id] == null) {
+              _sourceDoneTimes[s.source_id] = Date.now() - _progressStart;
+            }
             if (isDone && !launched.has(s.source_id)) {
               launched.add(s.source_id);
               const loaderFn = SOURCE_LOADERS[s.source_id];
@@ -3838,15 +3894,21 @@
             }
           }
 
+          _renderProgress(sources);
           const allDone = doneCount === enabledIds.size;
           if (!allDone) {
-            statusLine.innerHTML = `<span class="status-spinner"></span>Loading… ${doneCount}/${enabledIds.size} sources ready`;
+            statusLine.textContent = `Fetching overlays… ${doneCount}/${enabledIds.size} sources ready`;
           }
           if (allDone) break;
         }
 
-        // Wait for any in-flight overlay fetches, then leave AOI inspection as
-        // an explicit user action so startup only loads datasets once.
+        if (myGen !== _loadGen) return; // superseded
+
+        // Final render so all sources show ✓, then fade out after 4s.
+        _renderProgress(state.sources);
+        setTimeout(() => { if (_progressEl) _progressEl.style.display = "none"; }, 4000);
+
+        // Wait for any in-flight overlay fetches, then inspect.
         await Promise.all(overlayPromises);
         renderFreshness(state.sources);
 
@@ -3859,19 +3921,23 @@
             : "Datasets ready. Shift + drag on the map to inspect an AOI.";
         }
       } catch (error) {
+        if (myGen !== _loadGen) return; // superseded — don't overwrite newer load's UI
         console.error("Load failed:", error);
         statusLine.classList.remove("is-loading");
         statusLine.textContent = error.message?.includes("Failed to fetch")
           ? "Server unreachable — is uvicorn running? (PYTHONPATH=src uvicorn ipb_backend.main:app)"
           : "Workspace refresh failed.";
       } finally {
-        state.isLoading = false;
-        statusLine.classList.remove("is-loading");
-        refreshBtn.disabled = false;
-        refreshBtn.textContent = "Load Data";
-        if (_pendingReload) {
-          _pendingReload = false;
-          bootstrapWorkspace();
+        if (myGen === _loadGen) {
+          // Always ensure button is unlocked (handles early-exit paths and errors).
+          state.isLoading = false;
+          statusLine.classList.remove("is-loading");
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = "Load Data";
+          if (_pendingReload) {
+            _pendingReload = false;
+            bootstrapWorkspace();
+          }
         }
       }
     }

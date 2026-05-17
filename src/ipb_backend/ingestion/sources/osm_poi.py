@@ -265,12 +265,8 @@ class OsmPoiAdapter(SourceAdapter):
         categories: dict[str, list[dict[str, Any]]] = {}
         batch_errors: list[str] = []
 
-        # Run batches sequentially to avoid Overpass 429 rate limiting.
-        results = []
         async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT, headers={"User-Agent": "IPB-Backend/1.0"}) as client:
-            for i, batch in enumerate(BATCHES):
-                result = await self._fetch_batch(client, i, batch, b)
-                results.append(result)
+            results = await asyncio.gather(*[self._fetch_batch(client, i, batch, b) for i, batch in enumerate(BATCHES)])
 
         for index, elements, error in results:
             if error:

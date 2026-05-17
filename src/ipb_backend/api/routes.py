@@ -112,10 +112,10 @@ def _record_for_area_or_latest(records, source_id: str, area: Optional[str] = No
     if not matching:
         return None
     if area:
-        for record in reversed(matching):
-            if record.area == area:
-                return record
-        return None
+        area_matching = [r for r in matching if r.area == area]
+        if not area_matching:
+            return None
+        return max(area_matching, key=lambda r: r.retrieved_at)
     return max(matching, key=lambda record: record.retrieved_at)
 
 
@@ -1026,6 +1026,7 @@ async def map_data_satellite_tracks(
     area: str = Query("North Karelia"),
     hours: float | None = Query(None, description="Hours to project ground tracks forward"),
     timeframe: str | None = Query(None, description="Timeframe string (overridden by hours)"),
+    bbox: str | None = Query(None, description="w,s,e,n filter bbox — tracks not intersecting this box are dropped"),
     services=Depends(get_services),
 ):
     """Ground track corridors for Russian satellites — the core concealment planning layer."""
@@ -1057,6 +1058,24 @@ async def map_data_satellite_tracks(
     if not isinstance(adapter, SatelliteTleAdapter):
         return {"type": "FeatureCollection", "features": [], "available": False}
 
+    # Parse optional bbox filter
+    filter_bbox: tuple[float, float, float, float] | None = None
+    if bbox:
+        try:
+            parts = [float(x) for x in bbox.split(",")]
+            if len(parts) == 4:
+                filter_bbox = (parts[0], parts[1], parts[2], parts[3])  # w,s,e,n
+        except ValueError:
+            pass
+
+    def _seg_intersects_bbox(coords: list[list[float]], fb: tuple) -> bool:
+        """True if any point is within 3° of the bbox (loose pre-filter)."""
+        w, s, e, n = fb[0] - 3.0, fb[1] - 3.0, fb[2] + 3.0, fb[3] + 3.0
+        for lon, lat in coords:
+            if w <= lon <= e and s <= lat <= n:
+                return True
+        return False
+
     now = datetime.now(timezone.utc)
     features = []
 
@@ -1068,8 +1087,10 @@ async def map_data_satellite_tracks(
         if not tle1 or not tle2:
             continue
 
-        # 300s steps: ~5× fewer points, visually identical lines at map scale.
-        points = adapter.compute_ground_track(tle1, tle2, now, hours=hours, step_seconds=300)
+        # Use 60s steps when a bbox is given so small rectangles get enough
+        # sample points for accurate intersection checks; 300s otherwise.
+        step = 60 if filter_bbox else 300
+        points = adapter.compute_ground_track(tle1, tle2, now, hours=hours, step_seconds=step)
         if not points:
             continue
 
@@ -1084,41 +1105,78 @@ async def map_data_satellite_tracks(
         if current:
             segments.append(current)
 
+        # Drop this satellite entirely if no segment passes near the bbox
+        if filter_bbox and not any(_seg_intersects_bbox(s, filter_bbox) for s in segments):
+            continue
+
         sat_type = info.get("type", "")
         is_sar = "sar" in sat_type.lower()
-        # Color encoded in properties so the frontend style function can read it
         line_color = "#e67e22" if is_sar else "#c0392b"
 
-        # One feature per continuous segment
         for seg_coords in segments:
             if len(seg_coords) < 2:
                 continue
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": seg_coords},
-                "properties": {
-                    "_collection": "satellite-tracks",
-                    "name": name,
-                    "type": sat_type,
-                    "norad_id": info.get("norad_id"),
-                    "track_start_utc": points[0]["t_iso"],
-                    "track_end_utc": points[-1]["t_iso"],
-                    "track_hours": hours,
-                    "is_sar": is_sar,
-                    "_color": line_color,
-                },
-            })
+            if filter_bbox:
+                # Extract only the portion of the segment that passes within 3° of the
+                # bbox, with a ±5-point context margin so the arc is visible.
+                bw, bs, be, bn = filter_bbox[0] - 3.0, filter_bbox[1] - 3.0, filter_bbox[2] + 3.0, filter_bbox[3] + 3.0
+                inside_idxs = [i for i, pt in enumerate(seg_coords)
+                               if bw <= pt[0] <= be and bs <= pt[1] <= bn]
+                if not inside_idxs:
+                    continue
+                i_start = max(0, inside_idxs[0] - 5)
+                i_end   = min(len(seg_coords) - 1, inside_idxs[-1] + 5)
+                pass_coords = seg_coords[i_start:i_end + 1]
+                if len(pass_coords) < 2:
+                    continue
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "LineString", "coordinates": pass_coords},
+                    "properties": {
+                        "_collection": "satellite-tracks",
+                        "name": name,
+                        "type": sat_type,
+                        "norad_id": info.get("norad_id"),
+                        "track_start_utc": points[0]["t_iso"],
+                        "track_end_utc": points[-1]["t_iso"],
+                        "track_hours": hours,
+                        "is_sar": is_sar,
+                        "_color": line_color,
+                    },
+                })
+            else:
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "LineString", "coordinates": seg_coords},
+                    "properties": {
+                        "_collection": "satellite-tracks",
+                        "name": name,
+                        "type": sat_type,
+                        "norad_id": info.get("norad_id"),
+                        "track_start_utc": points[0]["t_iso"],
+                        "track_end_utc": points[-1]["t_iso"],
+                        "track_hours": hours,
+                        "is_sar": is_sar,
+                        "_color": line_color,
+                    },
+                })
 
-        # Time-label waypoints — frequency scales with horizon so labels don't
-        # blanket the map at long timeframes. Points list is in 300s steps.
+        # Time-label waypoints inside the bbox buffer
         if hours <= 3:
-            label_step = 3   # every 15 min
+            label_step = 3
         elif hours <= 8:
-            label_step = 6   # every 30 min
+            label_step = 6
         else:
-            label_step = 12  # every 60 min
+            label_step = 12
+        # Adjust label_step for 60s steps (was calibrated for 300s)
+        if step == 60:
+            label_step *= 5
         for i, pt in enumerate(points):
             if i % label_step == 0 and not pt.get("crossing"):
+                if filter_bbox:
+                    lw, ls, le, ln = filter_bbox[0] - 3.0, filter_bbox[1] - 3.0, filter_bbox[2] + 3.0, filter_bbox[3] + 3.0
+                    if not (lw <= pt["lon"] <= le and ls <= pt["lat"] <= ln):
+                        continue
                 t_label = pt["t_iso"][11:16] + "Z"
                 features.append({
                     "type": "Feature",
