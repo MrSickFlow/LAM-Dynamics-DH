@@ -836,6 +836,24 @@ async def map_data_satellite_tracks(
                 },
             })
 
+        # Time-label waypoints every 30 minutes (points list is in 60s steps → step 30)
+        for i, pt in enumerate(points):
+            if i % 30 == 0 and not pt.get("crossing"):
+                t_label = pt["t_iso"][11:16] + "Z"
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [pt["lon"], pt["lat"]]},
+                    "properties": {
+                        "_collection": "satellite-tracks",
+                        "feature_type": "time_label",
+                        "t_label": t_label,
+                        "t_iso": pt["t_iso"],
+                        "name": name,
+                        "is_sar": is_sar,
+                        "_color": line_color,
+                    },
+                })
+
     return {
         "type": "FeatureCollection",
         "features": features,

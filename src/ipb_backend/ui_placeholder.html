@@ -559,6 +559,17 @@
       border-color: var(--accent);
     }
 
+    .sat-time-label {
+      font-size: 10px;
+      font-weight: 700;
+      font-family: "Segoe UI", monospace, sans-serif;
+      white-space: nowrap;
+      pointer-events: none;
+      line-height: 1;
+      text-shadow: 0 0 4px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.8);
+      letter-spacing: 0.02em;
+    }
+
     #overlay-tooltip {
       display: none;
       position: fixed;
@@ -2007,6 +2018,20 @@
           // pointToLayer fires for Point geometry regardless of whether style is a function.
           // This handles power substation nodes mixed in with line features.
           pointToLayer: (feat, latlng) => {
+            // Time-label waypoints on ground tracks → lightweight divIcon text label
+            if (collection.id === "satellite-tracks" && feat.properties?.feature_type === "time_label") {
+              const color = feat.properties._color || "#c0392b";
+              return L.marker(latlng, {
+                icon: L.divIcon({
+                  className: "",
+                  html: `<span class="sat-time-label" style="color:${color}">${feat.properties.t_label}</span>`,
+                  iconSize: null,
+                  iconAnchor: [16, 8],
+                }),
+                interactive: false,
+                pane: "tracksPane",
+              });
+            }
             let fc = style.color || (feat.properties?._collection === "poi-power_infrastructure" ? "#f0a500" : "#888");
             // Russian satellite dots rendered in red so they're distinct from Western ones
             if (collection.id === "satellites" && feat.properties?.origin === "russian") fc = "#e53935";
@@ -2061,6 +2086,7 @@
                 if (!props.has_position) details += `<br><small style="color:#aaa">Position estimated</small>`;
                 layerRef.on("click", () => showSatelliteFootprint(feature, swath));
               } else if (collection.id === "satellite-tracks") {
+                if (props.feature_type === "time_label") return;
                 const start = props.track_start_utc ? new Date(props.track_start_utc).toUTCString().replace(" GMT","Z") : "?";
                 const end   = props.track_end_utc   ? new Date(props.track_end_utc).toUTCString().replace(" GMT","Z") : "?";
                 const threat = props.is_sar
