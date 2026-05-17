@@ -41,6 +41,12 @@ def parse_timeframe(timeframe: str, *, forward: bool = False) -> tuple[datetime,
     """
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
 
+    # Snapshot / "now" — current moment
+    # forward=False (observations): last 2 hours ending now
+    # forward=True  (forecast/passes): next 24 hours starting now
+    if timeframe.strip().lower() in ("now", "snapshot"):
+        return (now, now + timedelta(hours=24)) if forward else (now - timedelta(hours=2), now)
+
     # Absolute ISO interval: "START/END"
     if "/" in timeframe:
         start_str, _, end_str = timeframe.partition("/")
