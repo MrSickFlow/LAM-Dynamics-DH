@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import math
 import re
 import unicodedata
@@ -162,24 +163,32 @@ class FmiAdapter(SourceAdapter):
                 response.raise_for_status()
             return self._parse_response(response.text)
 
-        # Expand bbox + lookback progressively. Order picks "current data near
-        # the point" first, then widens spatially, then temporally.
+        # Fire all bbox/lookback widening attempts concurrently and return the
+        # first one that has observations. Cancel the rest immediately.
         attempts = (
-            (start_time, end_time, 0.5),    # ~55 km, current window
-            (start_time, end_time, 1.5),    # ~165 km, current window
-            (end_time - timedelta(hours=24), end_time, 1.5),  # 24h widen, 165 km
-            (end_time - timedelta(hours=72), end_time, 3.0),  # 72h widen, ~330 km
+            (start_time, end_time, 0.5),                       # ~55 km, current
+            (start_time, end_time, 1.5),                       # ~165 km, current
+            (end_time - timedelta(hours=24), end_time, 1.5),   # 24h, 165 km
+            (end_time - timedelta(hours=72), end_time, 3.0),   # 72h, ~330 km
         )
-        last = None
-        for s, e, half_deg in attempts:
-            parsed = await _query(s, e, half_deg)
-            last = parsed
-            if parsed.get("observations"):
-                # Pick the nearest reporting station from the response and clip
-                # the observation set to it — bbox queries can return multiple.
-                return self._select_nearest_station(parsed, lat, lon)
-        # All attempts empty — return whatever we have (empty observations).
-        return last or {"station": {}, "observations": {}}
+
+        tasks = [asyncio.create_task(_query(s, e, hd)) for s, e, hd in attempts]
+        last_result: dict | None = None
+        try:
+            for coro in asyncio.as_completed(tasks):
+                try:
+                    parsed = await coro
+                except Exception:
+                    continue
+                last_result = parsed
+                if parsed.get("observations"):
+                    return self._select_nearest_station(parsed, lat, lon)
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+
+        return last_result or {"station": {}, "observations": {}}
 
     async def fetch_forecast_by_latlon(self, lat: float, lon: float, hours: float = FMI_FORECAST_MAX_HOURS) -> dict:
         now = datetime.now(timezone.utc)
@@ -237,17 +246,28 @@ class FmiAdapter(SourceAdapter):
                 response.raise_for_status()
             return response.text
 
-        # Try the requested freshness window first; widen if the place returned
-        # no observations (sparse rural stations report intermittently).
-        xml = await _query(start_time, end_time)
-        if self._has_observations(xml):
-            return xml
-        wide_start = end_time - timedelta(hours=24)
-        xml = await _query(wide_start, end_time)
-        if self._has_observations(xml):
-            return xml
-        widest_start = end_time - timedelta(hours=72)
-        return await _query(widest_start, end_time)
+        # Fire all lookback widths concurrently; return the first with observations.
+        lookbacks = [
+            (start_time, end_time),
+            (end_time - timedelta(hours=24), end_time),
+            (end_time - timedelta(hours=72), end_time),
+        ]
+        tasks = [asyncio.create_task(_query(s, e)) for s, e in lookbacks]
+        last_xml: str = ""
+        try:
+            for coro in asyncio.as_completed(tasks):
+                try:
+                    xml = await coro
+                except Exception:
+                    continue
+                last_xml = xml
+                if self._has_observations(xml):
+                    return xml
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+        return last_xml
 
     def _has_observations(self, xml_payload: str) -> bool:
         try:

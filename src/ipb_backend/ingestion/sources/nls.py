@@ -99,7 +99,10 @@ class NationalLandSurveyAdapter(SourceAdapter):
 
         api_key = self._get_api_key()
 
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        # Per-collection timeout: a single slow collection must not stall the batch.
+        _PER_COLLECTION_TIMEOUT = 20.0
+
+        async with httpx.AsyncClient(timeout=_PER_COLLECTION_TIMEOUT, follow_redirects=True) as client:
             async def fetch_collection(coll_id: str) -> tuple[str, dict[str, Any]]:
                 url = f"{self.BASE_URL}/collections/{coll_id}/items"
                 params: dict[str, Any] = {
@@ -108,7 +111,10 @@ class NationalLandSurveyAdapter(SourceAdapter):
                     "api-key": api_key,
                 }
                 try:
-                    response = await client.get(url, params=params)
+                    response = await asyncio.wait_for(
+                        client.get(url, params=params),
+                        timeout=_PER_COLLECTION_TIMEOUT,
+                    )
                     response.raise_for_status()
                     data = response.json()
                     features = data.get("features", [])

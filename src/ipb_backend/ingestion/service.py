@@ -52,6 +52,11 @@ class IngestionService:
         lt_key = _load_target_key(request.load_target)
         for record in records:
             self._records[(record.source_id, record.area, lt_key)] = record
+
+        # Rebuild spatial index so point-inspection queries stay O(log n).
+        from ipb_backend.spatial import nearby_index
+        nearby_index.rebuild(list(self._records.values()))
+
         return IngestionResult(requested_sources=source_ids, produced_records=records)
 
     async def _fetch_one_timed(self, source_id: str, area: str, timeframe: str, load_target=None):

@@ -167,6 +167,77 @@ def clip_geojson_feature(feature: dict[str, Any], mask: BaseGeometry) -> Optiona
     }
 
 
+class NearbyIndex:
+    """STRtree-backed spatial index for fast radius queries against POI + cell tower records."""
+
+    def __init__(self) -> None:
+        self._geoms: list[Any] = []
+        self._meta: list[dict[str, Any]] = []
+        self._tree: Any = None  # shapely STRtree, built lazily
+
+    def rebuild(self, records: list[Any]) -> None:
+        from shapely.geometry import Point
+        from shapely.strtree import STRtree
+
+        geoms: list[Any] = []
+        meta: list[dict[str, Any]] = []
+
+        for record in records:
+            if record.source_id == "osm-poi":
+                for cat_id, items in record.data.get("categories", {}).items():
+                    for item in items:
+                        lat = item.get("lat")
+                        lon = item.get("lon")
+                        if lat is None or lon is None:
+                            continue
+                        geoms.append(Point(lon, lat))
+                        meta.append({"kind": "poi", "cat_id": cat_id})
+            elif record.source_id == "opencellid":
+                for cell in record.data.get("cells", []):
+                    lat = cell.get("lat")
+                    lon = cell.get("lon")
+                    if lat is None or lon is None:
+                        continue
+                    geoms.append(Point(lon, lat))
+                    meta.append({"kind": "cell"})
+
+        self._geoms = geoms
+        self._meta = meta
+        self._tree = STRtree(geoms) if geoms else None
+
+    def query_radius(self, lat: float, lon: float, radius_deg: float) -> dict[str, Any]:
+        from shapely.geometry import Point
+
+        poi_counts: dict[str, int] = {}
+        cell_towers = 0
+
+        if self._tree is None:
+            return {"search_radius_km": radius_deg * 111.0, "poi_counts": poi_counts, "cell_towers_within_radius": cell_towers}
+
+        center = Point(lon, lat)
+        circle = center.buffer(radius_deg)
+        idxs = self._tree.query(circle)
+        for i in idxs:
+            if not circle.contains(self._geoms[i]):
+                continue
+            m = self._meta[i]
+            if m["kind"] == "poi":
+                cat = m["cat_id"]
+                poi_counts[cat] = poi_counts.get(cat, 0) + 1
+            else:
+                cell_towers += 1
+
+        return {
+            "search_radius_km": round(radius_deg * 111.0, 1),
+            "poi_counts": poi_counts,
+            "cell_towers_within_radius": cell_towers,
+        }
+
+
+# Module-level singleton — rebuilt by IngestionService after each ingest.
+nearby_index = NearbyIndex()
+
+
 def polygon_area_sqkm(mask: BaseGeometry) -> float:
     mean_latitude = mask.centroid.y if not mask.is_empty else 0.0
     scaled = affinity.scale(

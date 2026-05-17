@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import time
 from functools import partial
 from pathlib import Path
 from typing import Any, Optional
@@ -575,7 +578,30 @@ def _build_freshness(services, latest_records):
     return freshness
 
 
+# AOI snapshot cache — keyed by (geometry_hash, timeframe).
+# TTL matches the fastest-refreshing source (FMI = 900 s) so cached results
+# are never staler than a fresh ingest would produce.
+_AOI_CACHE_TTL_S = 120.0
+_aoi_cache: dict[str, tuple[float, Any]] = {}  # key → (expires_at, result)
+
+
+def _aoi_cache_key(request: AoiInspectionRequest) -> str:
+    payload = json.dumps(
+        {"geometry": request.geometry, "timeframe": request.timeframe or "latest", "area": request.area or ""},
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], DataPackage]:
+    cache_key = _aoi_cache_key(request)
+    now = time.monotonic()
+    cached = _aoi_cache.get(cache_key)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+
     mask = geojson_to_shape(request.geometry)
     if mask.is_empty:
         raise HTTPException(status_code=400, detail="AOI geometry is empty")
@@ -619,7 +645,9 @@ def _build_aoi_snapshot(request: AoiInspectionRequest, services) -> tuple[dict[s
         freshness=freshness,
         requested_sources=list(latest_records.keys()),
     )
-    return selection, raw_data, freshness, metrics, evidence_bundle, data_package
+    result = (selection, raw_data, freshness, metrics, evidence_bundle, data_package)
+    _aoi_cache[cache_key] = (now + _AOI_CACHE_TTL_S, result)
+    return result
 
 
 @router.get("/health")
@@ -1004,7 +1032,8 @@ async def map_data_satellite_tracks(
         if not tle1 or not tle2:
             continue
 
-        points = adapter.compute_ground_track(tle1, tle2, now, hours=hours)
+        # 300s steps: ~5× fewer points, visually identical lines at map scale.
+        points = adapter.compute_ground_track(tle1, tle2, now, hours=hours, step_seconds=300)
         if not points:
             continue
 
@@ -1045,13 +1074,13 @@ async def map_data_satellite_tracks(
             })
 
         # Time-label waypoints — frequency scales with horizon so labels don't
-        # blanket the map at long timeframes. Points list is in 60s steps.
+        # blanket the map at long timeframes. Points list is in 300s steps.
         if hours <= 3:
-            label_step = 15
+            label_step = 3   # every 15 min
         elif hours <= 8:
-            label_step = 30
+            label_step = 6   # every 30 min
         else:
-            label_step = 60
+            label_step = 12  # every 60 min
         for i, pt in enumerate(points):
             if i % label_step == 0 and not pt.get("crossing"):
                 t_label = pt["t_iso"][11:16] + "Z"
@@ -1113,58 +1142,40 @@ async def weather_point(lat: float = Query(...), lon: float = Query(...), timefr
 
 
 def _nearby_context(lat: float, lon: float, records) -> dict[str, Any]:
-    RADIUS_DEG = 0.018  # ~2 km at 60 °N
-    poi_counts: dict[str, int] = {}
-    cell_towers = 0
-
-    for record in records:
-        if record.source_id == "osm-poi":
-            for cat_id, items in record.data.get("categories", {}).items():
-                for item in items:
-                    ilat = item.get("lat")
-                    ilon = item.get("lon")
-                    if ilat is None or ilon is None:
-                        continue
-                    if ((ilon - lon) ** 2 + (ilat - lat) ** 2) ** 0.5 <= RADIUS_DEG:
-                        poi_counts[cat_id] = poi_counts.get(cat_id, 0) + 1
-        elif record.source_id == "opencellid":
-            for cell in record.data.get("cells", []):
-                clat = cell.get("lat")
-                clon = cell.get("lon")
-                if clat is None or clon is None:
-                    continue
-                if ((clon - lon) ** 2 + (clat - lat) ** 2) ** 0.5 <= RADIUS_DEG:
-                    cell_towers += 1
-
-    return {
-        "search_radius_km": 2.0,
-        "poi_counts": poi_counts,
-        "cell_towers_within_radius": cell_towers,
-    }
+    from ipb_backend.spatial import nearby_index
+    RADIUS_DEG = 0.018  # ~2 km at 60°N
+    return nearby_index.query_radius(lat, lon, RADIUS_DEG)
 
 
 async def _build_point_snapshot(lat: float, lon: float, timeframe: str, services) -> dict[str, Any]:
     from ipb_backend.terrain.elevation import build_elevation_provider, compute_radial_los
 
     elevation_provider = build_elevation_provider(settings.nls_api_key)
-    elevation_m = await elevation_provider.get_elevation(lat, lon)
+    fmi: FmiAdapter = services["adapters"].get("fmi")
+
+    async def _get_weather() -> dict[str, Any]:
+        if not fmi:
+            return {}
+        try:
+            return await fmi.fetch_point_weather(lat, lon, timeframe)
+        except Exception:
+            return {}
+
+    # All three external calls are independent — run concurrently.
+    elevation_m, weather, los = await asyncio.gather(
+        elevation_provider.get_elevation(lat, lon),
+        _get_weather(),
+        compute_radial_los(lat, lon, settings.nls_api_key),
+    )
+
     terrain = TerrainSnapshot(
         elevation_m=elevation_m,
         elevation_source="nls_dem_2m",
         available=elevation_m is not None,
     )
 
-    weather: dict[str, Any] = {}
-    fmi: FmiAdapter = services["adapters"].get("fmi")
-    if fmi:
-        try:
-            weather = await fmi.fetch_point_weather(lat, lon, timeframe)
-        except Exception:
-            weather = {}
-
+    # _nearby_context now uses the in-memory STRtree index — no I/O.
     nearby = _nearby_context(lat, lon, services["ingestion_service"].records)
-
-    los: dict[str, Any] = await compute_radial_los(lat, lon, settings.nls_api_key)
 
     parts: list[str] = []
     if elevation_m is not None:

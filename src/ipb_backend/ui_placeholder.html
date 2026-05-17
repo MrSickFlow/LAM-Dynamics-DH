@@ -2285,7 +2285,7 @@
 
       setCustomLoadTarget(bbox);
       clearSelection();
-      bootstrapWorkspace();
+      statusLine.textContent = "Load rectangle set. Press Load Data to fetch datasets for this area.";
     }
 
     function startDrawing(latlng) {
@@ -2478,7 +2478,7 @@
       // Cell & Satellites
       celltowers:             "Mobile network mast locations from OpenCelliD. Indicates communications infrastructure coverage. Loss of towers degrades civilian and some military communications.",
       satellites:             "Reconnaissance and imaging satellites with real-time positions computed from TLE orbital data (SGP4). Each dot shows where the satellite is right now. Click for NORAD ID, altitude, type and next predicted pass over the area.",
-      "satellite-tracks":    "Russian satellite ground track corridors for the next 8 hours. Red lines = optical imaging (requires daylight + clear sky). Amber = SAR (all-weather, day/night). Each line shows the exact strip of ground the sensor will sweep — avoid exposure or movement when the track crosses your position.",
+      "satellite-tracks":    "Russian satellite ground track corridors for the next 8 hours. Red lines = optical imaging (requires daylight + clear sky). Amber = SAR (all-weather, day/night). Each line shows the exact strip of ground the sensor will sweep.",
       // Bridges & Tunnels
       bridges:                "Bridges and underpasses from Digiroad with load data: max mass (t), axle load (t), height clearance (m) and width (m). Critical for route planning with heavy vehicles.",
       tunnels:                "Road tunnels from Digiroad. Shown with dashed lines. Single points of failure for road corridors — high vulnerability to disruption.",
@@ -3750,11 +3750,11 @@
           throw new Error(`Workspace ingest failed with ${ingestResponse.status}`);
         }
         // Ingest returns 202 immediately and runs in the background.
-        // Poll /api/sources every 2s until all enabled sources leave "idle" state (max 150s).
+        // Poll /api/sources every 500ms until all enabled sources leave "idle" state (max 150s).
         const enabledIds = new Set((await ingestResponse.json()).source_ids || []);
         const deadline = Date.now() + 150_000;
         while (Date.now() < deadline) {
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise(r => setTimeout(r, 500));
           const pollResp = await fetch("/api/sources");
           if (!pollResp.ok) break;
           const sources = await pollResp.json();
@@ -3809,11 +3809,18 @@
 
         if (state.selectionGeometry) {
           await inspectSelection(state.selectionGeometry);
+        } else if (state.loadTarget?.kind === "bbox" && state.loadTarget.bbox_wgs84) {
+          // Auto-inspect the loaded rectangle so the panel is immediately populated.
+          const [w, s, e, n] = state.loadTarget.bbox_wgs84;
+          const bboxGeometry = {
+            type: "Polygon",
+            coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]],
+          };
+          state.selectionGeometry = bboxGeometry;
+          await inspectSelection(bboxGeometry);
         } else if (state.sources.length) {
           renderEmptyInspector("Draw an AOI to inspect intersecting source data.");
-          statusLine.textContent = state.loadTarget?.kind === "named_area"
-            ? "Datasets ready. Shift + drag on the map to inspect an AOI."
-            : "Custom area loaded. Shift + drag on the map to inspect an AOI inside the loaded rectangle.";
+          statusLine.textContent = "Datasets ready. Shift + drag on the map to inspect an AOI.";
         }
       } catch (error) {
         console.error(error);

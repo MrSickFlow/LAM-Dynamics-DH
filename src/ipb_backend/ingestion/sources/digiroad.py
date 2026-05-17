@@ -57,7 +57,11 @@ class DigiroadAdapter(SourceAdapter):
         area_label = resolve_load_target_label(area, load_target)
         bbox_str = format_bbox(bbox)
 
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        # Per-collection timeout: a single slow endpoint must not stall the whole
+        # batch. Partial results (some collections errored) are acceptable.
+        _PER_COLLECTION_TIMEOUT = 20.0
+
+        async with httpx.AsyncClient(timeout=_PER_COLLECTION_TIMEOUT, follow_redirects=True) as client:
             async def fetch_collection(coll_id: str) -> tuple[str, dict[str, Any]]:
                 url = f"{self.BASE_URL}/collections/{coll_id}/items"
                 params: dict[str, Any] = {
@@ -66,7 +70,10 @@ class DigiroadAdapter(SourceAdapter):
                     "f": "json",
                 }
                 try:
-                    response = await client.get(url, params=params)
+                    response = await asyncio.wait_for(
+                        client.get(url, params=params),
+                        timeout=_PER_COLLECTION_TIMEOUT,
+                    )
                     response.raise_for_status()
                     data = response.json()
                     features = data.get("features", [])
