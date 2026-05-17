@@ -10,6 +10,7 @@ import httpx
 from sgp4.api import Satrec, jday
 
 from ipb_backend.ingestion.base import SourceAdapter
+from ipb_backend.ingestion.timeframe import parse_timeframe
 from ipb_backend.models import DatasetRecord, LoadTarget
 
 AREA_CENTERS: dict[str, dict[str, float]] = {
@@ -88,7 +89,7 @@ class SatelliteTleAdapter(SourceAdapter):
         normalized = self._normalize_area(area)
         return AREA_CENTERS.get(normalized, AREA_CENTERS["north karelia"])
 
-    def _build_demo_satellites(self) -> dict[str, dict[str, Any]]:
+    def _build_demo_satellites(self, start_time: datetime, end_time: datetime) -> dict[str, dict[str, Any]]:
         import random
         rng = random.Random(42)
         names = [
@@ -101,28 +102,38 @@ class SatelliteTleAdapter(SourceAdapter):
             ("Sentinel-1A", "SAR imaging (C-band)"),
             ("Resurs-P 1", "Russian imaging (1m)"),
         ]
-        now = datetime.now(timezone.utc)
         result = {}
         for name, stype in names:
             norad = rng.randint(10000, 99999)
             alt = rng.randint(300, 900)
             period = rng.uniform(90, 100)
-            passes = []
-            for offset in range(4):
-                pt = now.timestamp() + offset * period * 60
-                passes.append({
-                    "pass_time_utc": datetime.fromtimestamp(pt, tz=timezone.utc).isoformat(),
-                    "pass_time_unix": int(pt),
-                    "duration_min": round(period, 1),
-                    "altitude_km": alt,
-                    "confidence": "estimated",
-                })
+            passes = self._passes_in_window(start_time, end_time, period, alt)
             result[name] = {
                 "norad_id": norad,
                 "type": stype,
                 "predicted_passes": passes,
             }
         return result
+
+    @staticmethod
+    def _passes_in_window(
+        start_time: datetime, end_time: datetime, period_min: float, altitude_km: float
+    ) -> list[dict[str, Any]]:
+        """Generate evenly-spaced pass entries between start_time and end_time."""
+        passes = []
+        t = start_time.timestamp()
+        end_ts = end_time.timestamp()
+        step = period_min * 60
+        while t <= end_ts:
+            passes.append({
+                "pass_time_utc": datetime.fromtimestamp(t, tz=timezone.utc).isoformat(),
+                "pass_time_unix": int(t),
+                "duration_min": round(period_min, 1),
+                "altitude_km": round(altitude_km),
+                "confidence": "estimated",
+            })
+            t += step
+        return passes
 
     async def _parse_tle_lines(self, raw_lines: list[str]) -> dict[str, dict[str, Any]]:
         result = {}
@@ -221,17 +232,22 @@ class SatelliteTleAdapter(SourceAdapter):
                 except Exception as exc:
                     fetch_errors["celestrak"] = str(exc)
 
+        # Resolve the planning window (forward-looking from now)
+        window_start, window_end = parse_timeframe(timeframe, forward=True)
+        now = datetime.now(timezone.utc)
+
         if not satellite_info:
-            satellite_info = self._build_demo_satellites()
+            satellite_info = self._build_demo_satellites(window_start, window_end)
             provider = "Demo data (all TLE sources unreachable)"
             used_demo = True
 
         if not used_demo:
-            now = datetime.now(timezone.utc)
             for name, info in satellite_info.items():
                 tle1 = info.get("tle_line_1", "")
                 tle2 = info.get("tle_line_2", "")
-                passes = self._simple_pass_prediction(tle2, center["lat"], center["lon"], now)
+                passes = self._simple_pass_prediction(
+                    tle2, center["lat"], center["lon"], window_start, window_end
+                )
                 info["predicted_passes"] = passes
                 pos = self._compute_position(tle1, tle2, now)
                 if pos:
@@ -252,6 +268,8 @@ class SatelliteTleAdapter(SourceAdapter):
                     "lat": center["lat"],
                     "lon": center["lon"],
                     "timeframe": timeframe,
+                    "window_start": window_start.isoformat(),
+                    "window_end": window_end.isoformat(),
                 },
                 "errors": fetch_errors,
                 "satellites": satellite_info,
@@ -266,29 +284,22 @@ class SatelliteTleAdapter(SourceAdapter):
         return None
 
     def _simple_pass_prediction(
-        self, tle_line2: str, obs_lat: float, obs_lon: float, now: datetime
+        self,
+        tle_line2: str,
+        obs_lat: float,
+        obs_lon: float,
+        start_time: datetime,
+        end_time: datetime,
     ) -> list[dict[str, Any]]:
         try:
             inc_deg = float(tle_line2[8:16].strip())
             mean_motion = float(tle_line2[52:63].strip())
             period_min = 1440.0 / mean_motion
             alt_km = 6371.0 * (mean_motion / 1440.0) ** (-2 / 3.0) - 6371.0
-            inc = math.radians(inc_deg)
             max_lat = abs(inc_deg)
             if abs(obs_lat) > max_lat + 5:
                 return []
-            passes: list[dict[str, Any]] = []
-            for orbit_offset in range(-1, 5):
-                pass_time = now.timestamp() + orbit_offset * period_min * 60
-                pass_dt = datetime.fromtimestamp(pass_time, tz=timezone.utc)
-                passes.append({
-                    "pass_time_utc": pass_dt.isoformat(),
-                    "pass_time_unix": int(pass_time),
-                    "duration_min": round(period_min, 1),
-                    "altitude_km": round(alt_km),
-                    "confidence": "estimated",
-                })
-            return sorted(passes, key=lambda p: p["pass_time_unix"])[:6]
+            return self._passes_in_window(start_time, end_time, period_min, alt_km)
         except (ValueError, IndexError):
             return []
 

@@ -250,6 +250,28 @@ def _build_raw_data_from_package(data_package: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _ts_stats(param_data: dict[str, Any]) -> dict[str, Any]:
+    """Return min/max/mean/trend from a parameter's hourly values list."""
+    values = [
+        pt["value"] for pt in param_data.get("values", [])
+        if pt.get("value") is not None
+    ]
+    if not values:
+        return {}
+    result: dict[str, Any] = {
+        "min": round(min(values), 1),
+        "max": round(max(values), 1),
+        "mean": round(sum(values) / len(values), 1),
+    }
+    if len(values) >= 6:
+        n = max(1, len(values) // 3)
+        first_mean = sum(values[:n]) / n
+        last_mean = sum(values[-n:]) / n
+        diff = last_mean - first_mean
+        result["trend"] = "rising" if diff > 2 else "falling" if diff < -2 else "stable"
+    return result
+
+
 def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, Any]) -> str:
     """Build a compact, military-relevant text description of all available data."""
     lines: list[str] = []
@@ -281,17 +303,25 @@ def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, An
             for col in digiroad["collections"][:3]:
                 lines.append(f"  - {col.get('label', col.get('collection', ''))}: {col.get('count', 0)}")
 
-    # Weather
+    # ── Weather ──────────────────────────────────────────────────────────────
     fmi = raw_data.get("fmi", {})
     obs = fmi.get("observations", {})
+    fmi_query = fmi.get("query", {})
     if obs:
         def _val(name: str) -> Any:
             return (obs.get(name) or {}).get("latest", {}).get("value")
+
         temp = _val("temperature")
         wind = _val("wind_speed")
         gust = _val("wind_gust")
         precip = _val("precipitation")
         cloud = _val("cloud_cover")
+
+        # Window header
+        win_start = fmi_query.get("start_time", "")
+        win_end = fmi_query.get("end_time", "")
+        win_label = f" (obs window {win_start} → {win_end})" if win_start else ""
+
         parts = []
         if temp is not None:
             parts.append(f"temp {temp}°C")
@@ -300,20 +330,107 @@ def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, An
         if precip is not None:
             parts.append(f"precip {precip} mm/h")
         if cloud is not None:
-            parts.append(f"cloud cover {cloud}%")
+            parts.append(f"cloud {cloud}%")
+
         if parts:
-            lines.append(f"WEATHER: {', '.join(parts)}")
-            # Operational weather notes
-            if wind is not None and float(wind) > 10:
-                lines.append("  - Wind >10 m/s: drone operations severely restricted")
-            elif wind is not None and float(wind) > 7:
-                lines.append("  - Wind 7-10 m/s: small drone operations degraded")
-            if precip is not None and float(precip) > 2:
-                lines.append("  - Active precipitation: drone ops restricted, visibility reduced, mobility degraded")
-            if temp is not None and float(temp) < -5:
-                lines.append("  - Cold weather: equipment reliability concerns, personnel cold-weather requirements")
-            if cloud is not None and float(cloud) > 80:
-                lines.append("  - Heavy cloud cover: aerial surveillance and satellite observation degraded")
+            lines.append(f"WEATHER{win_label}:")
+            lines.append(f"  CURRENT (latest obs): {', '.join(parts)}")
+
+        # Time-series trends over the observation window
+        trend_lines: list[str] = []
+        temp_stats = _ts_stats(obs.get("temperature", {}))
+        if temp_stats:
+            trend = f" / trend: {temp_stats['trend']}" if "trend" in temp_stats else ""
+            trend_lines.append(f"    Temperature: {temp_stats['min']}–{temp_stats['max']}°C (avg {temp_stats['mean']}°C{trend})")
+        wind_stats = _ts_stats(obs.get("wind_speed", {}))
+        gust_stats = _ts_stats(obs.get("wind_gust", {}))
+        if wind_stats:
+            gust_note = f", gusts up to {gust_stats.get('max', '')} m/s" if gust_stats else ""
+            trend_lines.append(f"    Wind speed: avg {wind_stats['mean']} m/s, peak {wind_stats['max']} m/s{gust_note}")
+        precip_vals = [pt["value"] for pt in obs.get("precipitation", {}).get("values", []) if pt.get("value") is not None]
+        if precip_vals:
+            total_precip = round(sum(precip_vals), 1)
+            trend_lines.append(f"    Precipitation: {total_precip} mm total over window")
+        cloud_stats = _ts_stats(obs.get("cloud_cover", {}))
+        if cloud_stats:
+            trend_lines.append(f"    Cloud cover: avg {cloud_stats['mean']}% (min {cloud_stats['min']}%, max {cloud_stats['max']}%)")
+        if trend_lines:
+            lines.append("  OBSERVED RANGE:")
+            lines.extend(trend_lines)
+
+        # 48-hour forecast
+        forecast = fmi.get("forecast", {})
+        fc_obs = forecast.get("observations", {})
+        if fc_obs:
+            fc_parts: list[str] = []
+            fc_temp = _ts_stats(fc_obs.get("temperature", {}))
+            if fc_temp:
+                fc_parts.append(f"temp {fc_temp['min']}–{fc_temp['max']}°C")
+            fc_wind = _ts_stats(fc_obs.get("wind_speed", {}))
+            if fc_wind:
+                fc_parts.append(f"wind avg {fc_wind['mean']} m/s (max {fc_wind['max']} m/s)")
+            fc_precip_vals = [pt["value"] for pt in fc_obs.get("precipitation", {}).get("values", []) if pt.get("value") is not None]
+            if fc_precip_vals:
+                fc_parts.append(f"precip {round(sum(fc_precip_vals), 1)} mm total")
+            fc_cloud = _ts_stats(fc_obs.get("cloud_cover", {}))
+            if fc_cloud:
+                fc_parts.append(f"cloud avg {fc_cloud['mean']}%")
+            if fc_parts:
+                lines.append(f"  FORECAST (next 48h): {', '.join(fc_parts)}")
+
+        # Consolidated operational notes across observed + forecast worst-case
+        peak_wind = max(
+            wind_stats.get("max", 0) if wind_stats else 0,
+            _ts_stats(fc_obs.get("wind_speed", {})).get("max", 0) if fc_obs else 0,
+        )
+        peak_precip = max(
+            max((pt["value"] for pt in obs.get("precipitation", {}).get("values", []) if pt.get("value") is not None), default=0),
+            max((pt["value"] for pt in (fc_obs or {}).get("precipitation", {}).get("values", []) if pt.get("value") is not None), default=0),
+        )
+        avg_cloud = cloud_stats.get("mean", 0) if cloud_stats else 0
+        min_temp = min(
+            temp_stats.get("min", 99) if temp_stats else 99,
+            _ts_stats(fc_obs.get("temperature", {})).get("min", 99) if fc_obs else 99,
+        )
+        op_notes: list[str] = []
+        if peak_wind > 10:
+            op_notes.append(f"  - Peak wind {peak_wind} m/s: drone operations severely restricted during high-wind periods")
+        elif peak_wind > 7:
+            op_notes.append(f"  - Peak wind {peak_wind} m/s: small drone operations degraded during high-wind periods")
+        if peak_precip > 2:
+            op_notes.append(f"  - Precipitation peak {peak_precip} mm/h: mobility degraded on unpaved routes, drone ops restricted")
+        if avg_cloud > 80:
+            op_notes.append(f"  - Cloud cover avg {avg_cloud}%: optical aerial/satellite observation severely degraded throughout")
+        elif avg_cloud > 50:
+            op_notes.append(f"  - Cloud cover avg {avg_cloud}%: intermittent optical observation windows only")
+        if min_temp < -5:
+            op_notes.append(f"  - Min temperature {min_temp}°C: cold-weather equipment precautions required")
+        if op_notes:
+            lines.append("  OPERATIONAL WEATHER NOTES:")
+            lines.extend(op_notes)
+
+    # ── Satellite overpass schedule ───────────────────────────────────────────
+    sat_data = raw_data.get("satellites", {})
+    satellites = sat_data.get("satellites", {}) if isinstance(sat_data, dict) else {}
+    if satellites:
+        sat_query = sat_data.get("query", {})
+        win_start = sat_query.get("window_start", "")
+        win_end = sat_query.get("window_end", "")
+        win_label = f" ({win_start[:10]} → {win_end[:10]})" if win_start else ""
+        lines.append(f"SATELLITE OVERPASSES{win_label}:")
+        for name, info in list(satellites.items())[:12]:
+            passes = info.get("predicted_passes", [])
+            if not passes:
+                continue
+            first_pass = passes[0].get("pass_time_utc", "")[:16].replace("T", " ")
+            sat_type = info.get("type", "")
+            lines.append(
+                f"  - {name} ({sat_type}): {len(passes)} passes, first {first_pass}Z"
+            )
+        # Warn if cloud cover will degrade optical passes
+        cloud_stats_for_warn = _ts_stats(obs.get("cloud_cover", {})) if obs else {}
+        if cloud_stats_for_warn.get("mean", 0) > 60:
+            lines.append("  NOTE: High cloud cover forecast — optical passes (Sentinel-2, WorldView, GeoEye, Pleiades) likely obscured; SAR passes unaffected")
 
     # Population
     pop = raw_data.get("statistics-finland", {})
@@ -366,7 +483,7 @@ def _format_data_for_prompt(raw_data: dict[str, Any], data_package: dict[str, An
         if "feature_density" in ind.get("indicator_id", ""):
             sid = ind["indicator_id"].replace("_feature_density", "")
             val = ind.get("value", 0)
-            if val and sid not in ("nls", "digiroad", "statistics-finland", "fmi", "opencellid", "osm-poi"):
+            if val and sid not in ("nls", "digiroad", "statistics-finland", "fmi", "opencellid", "osm-poi", "satellites"):
                 lines.append(f"  {sid}: {val:.2f} features/km²")
 
     if not lines:

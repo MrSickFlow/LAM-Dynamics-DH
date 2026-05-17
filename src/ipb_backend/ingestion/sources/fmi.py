@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 
 from ipb_backend.ingestion.base import SourceAdapter
+from ipb_backend.ingestion.timeframe import parse_timeframe
 from ipb_backend.models import DatasetRecord, LoadTarget, LoadTargetKind
 
 
@@ -73,6 +74,18 @@ class FmiAdapter(SourceAdapter):
             xml_payload = await self._fetch_xml(place, start_time, end_time)
             parsed = self._parse_response(xml_payload)
 
+        # Fetch 48-hour forecast so the LLM can reason over the full planning horizon.
+        # Failures are silently swallowed — observations are still recorded.
+        station = parsed.get("station", {})
+        forecast: dict = {}
+        if station.get("latitude") and station.get("longitude"):
+            try:
+                forecast = await self.fetch_forecast_by_latlon(
+                    float(station["latitude"]), float(station["longitude"])
+                )
+            except Exception:
+                pass
+
         return DatasetRecord(
             source_id=self.definition.source_id,
             category=self.definition.category,
@@ -89,6 +102,7 @@ class FmiAdapter(SourceAdapter):
                     "parameters": list(self.QUERY_PARAMETERS),
                 },
                 **parsed,
+                "forecast": forecast,
             },
         )
 
@@ -165,11 +179,7 @@ class FmiAdapter(SourceAdapter):
         return self.AREA_PLACE_ALIASES.get(normalized_area, area)
 
     def _resolve_time_window(self, timeframe: str) -> tuple[datetime, datetime]:
-        match = re.fullmatch(r"\s*(\d+)\s*h\s*", timeframe)
-        hours = int(match.group(1)) if match else 24
-        end_time = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-        start_time = end_time - timedelta(hours=hours)
-        return start_time, end_time
+        return parse_timeframe(timeframe, forward=False)
 
     def _parse_forecast_response(self, xml_payload: str) -> dict:
         root = ET.fromstring(xml_payload)

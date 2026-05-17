@@ -53,6 +53,10 @@ def _source_summary(source_id: str, payload: dict[str, Any], freshness_item: dic
         "population_coverage_ratio",
         "collections",
         "observations",
+        "forecast",
+        "query",
+        "satellites",
+        "total_tracked",
     ):
         value = payload.get(key)
         if value:

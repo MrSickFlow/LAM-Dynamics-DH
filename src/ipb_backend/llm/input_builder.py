@@ -30,7 +30,24 @@ def _summarize_source_details(raw_summary: dict[str, Any]) -> dict[str, Any]:
 
     observations = raw_summary.get("observations") or {}
     if observations:
-        details["observation_keys"] = sorted(observations.keys())[:8]
+        # Pass the latest value per parameter so the LLM sees actual numbers.
+        details["current_observations"] = {
+            key: {
+                "label": param.get("label", key),
+                "value": (param.get("latest") or {}).get("value"),
+                "unit": param.get("unit", ""),
+            }
+            for key, param in observations.items()
+            if (param.get("latest") or {}).get("value") is not None
+        }
+
+    # Include query window so the LLM knows the temporal scope.
+    query = raw_summary.get("query") or {}
+    if query.get("start_time") or query.get("window_start"):
+        details["time_window"] = {
+            "start": query.get("start_time") or query.get("window_start"),
+            "end": query.get("end_time") or query.get("window_end"),
+        }
 
     return details
 
