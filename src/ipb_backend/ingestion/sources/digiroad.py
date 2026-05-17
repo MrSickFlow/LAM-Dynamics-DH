@@ -6,12 +6,14 @@ from typing import Any
 import httpx
 
 from ipb_backend.ingestion.base import SourceAdapter
-from ipb_backend.models import DatasetRecord, LoadTarget
+from ipb_backend.models import DatasetRecord, LoadTarget, LoadTargetKind
 from ipb_backend.spatial import format_bbox, resolve_load_target_bbox, resolve_load_target_label
 
 
 class DigiroadAdapter(SourceAdapter):
     BASE_URL = "https://avoinapi.vaylapilvi.fi/vaylatiedot/digiroad/ogc/features/v1"
+    DEFAULT_LIMIT = 750
+    BBOX_LIMIT = 300
 
     COLLECTIONS: dict[str, str] = {
         "dr_nopeusrajoitus": "Speed limits",
@@ -41,6 +43,20 @@ class DigiroadAdapter(SourceAdapter):
     }
 
     COLLECTION_NAMES = tuple(COLLECTIONS.keys())
+    ESSENTIAL_COLLECTION_NAMES = (
+        "dr_tielinkki_silta_alikulku_tunneli",
+        "dr_max_massa",
+        "dr_max_korkeus",
+        "dr_max_leveys",
+        "dr_max_akselimassa",
+        "dr_yhdistelman_max_massa",
+        "dr_leveys",
+        "dr_tielinkki_tielinkin_tyyppi",
+        "dr_paallystetty_tie",
+        "dr_liikennemaara",
+        "dr_kaistojen_lukumaara",
+        "dr_kelirikko",
+    )
 
     def _ensure_collection_fetch_succeeded(self, collection_data: dict[str, dict[str, Any]]) -> None:
         if any("error" not in payload for payload in collection_data.values()):
@@ -52,10 +68,24 @@ class DigiroadAdapter(SourceAdapter):
         )
         raise ValueError(f"Digiroad fetch failed for all collections ({error_summary})")
 
+    def _collection_names_for_load(self, load_target: LoadTarget | None) -> tuple[str, ...]:
+        kind = getattr(load_target, "kind", None)
+        if kind == LoadTargetKind.BBOX:
+            return self.ESSENTIAL_COLLECTION_NAMES
+        return self.ESSENTIAL_COLLECTION_NAMES
+
+    def _feature_limit_for_load(self, load_target: LoadTarget | None) -> int:
+        kind = getattr(load_target, "kind", None)
+        if kind == LoadTargetKind.BBOX:
+            return self.BBOX_LIMIT
+        return self.DEFAULT_LIMIT
+
     async def fetch(self, area: str, timeframe: str, load_target: LoadTarget | None = None) -> DatasetRecord:
         bbox = resolve_load_target_bbox(area, load_target)
         area_label = resolve_load_target_label(area, load_target)
         bbox_str = format_bbox(bbox)
+        collection_names = self._collection_names_for_load(load_target)
+        feature_limit = self._feature_limit_for_load(load_target)
 
         # Per-collection timeout: a single slow endpoint must not stall the whole
         # batch. Partial results (some collections errored) are acceptable.
@@ -66,7 +96,7 @@ class DigiroadAdapter(SourceAdapter):
                 url = f"{self.BASE_URL}/collections/{coll_id}/items"
                 params: dict[str, Any] = {
                     "bbox": bbox_str,
-                    "limit": 10000,
+                    "limit": feature_limit,
                     "f": "json",
                 }
                 try:
@@ -90,7 +120,7 @@ class DigiroadAdapter(SourceAdapter):
                         "error": str(e),
                     }
 
-            results = await asyncio.gather(*[fetch_collection(cid) for cid in self.COLLECTION_NAMES])
+            results = await asyncio.gather(*[fetch_collection(cid) for cid in collection_names])
             collection_data = dict(results)
 
         self._ensure_collection_fetch_succeeded(collection_data)
@@ -113,6 +143,8 @@ class DigiroadAdapter(SourceAdapter):
                 "query": {
                     "area": area_label,
                     "bbox_wgs84": bbox_str,
+                    "collections": list(collection_names),
+                    "feature_limit": feature_limit,
                 },
                 "collections": collection_data,
                 "total_features": total_features,

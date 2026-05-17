@@ -44,6 +44,59 @@ async def test_digiroad_fetch_raises_when_all_collections_fail(monkeypatch):
         await adapter.fetch("North Karelia", "24h")
 
 
+class DigiroadCaptureClient:
+    def __init__(self):
+        self.get_calls = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url, params=None):
+        self.get_calls.append((url, params))
+        collection_id = url.rstrip("/").split("/")[-2]
+        return httpx.Response(
+            200,
+            json={"numberMatched": 1, "features": [{"type": "Feature", "geometry": None, "properties": {"collection": collection_id}}]},
+            request=httpx.Request("GET", url, params=params),
+        )
+
+
+@pytest.mark.anyio
+async def test_digiroad_fetch_trims_custom_bbox_scope(monkeypatch):
+    definition = SourceDefinition(
+        source_id="digiroad",
+        name="Digiroad",
+        category=SourceCategory.INFRASTRUCTURE,
+        description="Road and transport infrastructure datasets.",
+        refresh_interval_seconds=43200,
+    )
+    adapter = DigiroadAdapter(definition)
+    client = DigiroadCaptureClient()
+
+    monkeypatch.setattr(
+        "ipb_backend.ingestion.sources.digiroad.httpx.AsyncClient",
+        lambda *args, **kwargs: client,
+    )
+
+    record = await adapter.fetch(
+        "North Karelia",
+        "24h",
+        load_target=LoadTarget(
+            kind=LoadTargetKind.BBOX,
+            label="Custom Load Area",
+            bbox_wgs84=[29.9, 62.4, 30.2, 62.7],
+        ),
+    )
+
+    assert set(record.data["collections"]) == set(adapter.ESSENTIAL_COLLECTION_NAMES)
+    assert record.data["query"]["feature_limit"] == adapter.BBOX_LIMIT
+    assert all(call[1]["limit"] == adapter.BBOX_LIMIT for call in client.get_calls)
+    assert len(client.get_calls) == len(adapter.ESSENTIAL_COLLECTION_NAMES)
+
+
 @pytest.mark.anyio
 async def test_nls_fetch_raises_when_all_collections_fail(monkeypatch):
     definition = SourceDefinition(
